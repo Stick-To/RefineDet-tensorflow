@@ -13,32 +13,32 @@ import os
 # os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 lr = 0.01
-batch_size = 32
-buffer_size = 512
+batch_size = 1
+buffer_size = 2
 epochs = 300
 reduce_lr_epoch = [50, 200]
 ckpt_path = os.path.join('.', 'vgg_16.ckpt')
 config = {
-    'mode': 'train',  # train ,test
-    'data_format': 'channels_last',
+    'mode': 'train',                            # 'train' ,'test'
+    'data_format': 'channels_last',             # 'channels_last' ,'channels_first'
     'num_classes': 20,
     'weight_decay': 5e-4,
-    'keep_prob': 0.5,  # not used
+    'keep_prob': 0.5,                           # not used
     'batch_size': batch_size,
     'nms_score_threshold': 0.5,
     'nms_max_boxes': 20,
-    'nms_iou_threshold': 0.5,
+    'nms_iou_threshold': 0.45,
     'pretraining_weight': ckpt_path
 }
 
 image_preprocess_config = {
-    'data_format': 'channels_last',
+    'data_format': 'channels_last',             # 'channels_last' ,'channels_first'
     'target_size': [320, 320],
     'shorter_side': 480,
     'is_random_crop': False,
-    'random_horizontal_flip': 0.5,
-    'random_vertical_flip': 0.,
-    'pad_truth_to': 60
+    'random_horizontal_flip': 0.5,              # <=1.0
+    'random_vertical_flip': 0.,                 # < 1.0
+    'pad_truth_to': 60                          # >=2 ,  >= the maximum of number of bbox per image + 1
 }
 
 data = ['./test/test_00000-of-00005.tfrecord',
@@ -49,9 +49,9 @@ train_gen = voc_utils.get_generator(data,
 trainset_provider = {
     'data_shape': [320, 320, 3],
     'num_train': 5000,
-    'num_val': 0,
+    'num_val': 0,                               # not used
     'train_generator': train_gen,
-    'val_generator': None
+    'val_generator': None                       # not used
 }
 refinedet = net.RefineDet320(config, trainset_provider)
 # refinedet.load_weight('./refinedet320/test-64954')
@@ -62,7 +62,7 @@ for i in range(epochs):
         print('reduce lr, lr=', lr, 'now')
     mean_loss = refinedet.train_one_epoch(lr)
     print('>> mean loss', mean_loss)
-    refinedet.save_weight('latest', './refinedet320/test')
+    refinedet.save_weight('latest', './refinedet320/test')    # 'latest' 'best'
 
 
 

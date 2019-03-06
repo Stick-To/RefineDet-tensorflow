@@ -73,9 +73,9 @@ class RefineDet320:
         with tf.variable_scope('feature_extractor'):
             feat1, feat2, feat3, feat4, downsampling_rate1, downsampling_rate2, downsampling_rate3, downsampling_rate4 = self._feature_extractor(self.images)
             anchor_scale1 = downsampling_rate1 * 4
-            anchor_scale2 = downsampling_rate1 * 4
-            anchor_scale3 = downsampling_rate1 * 4
-            anchor_scale4 = downsampling_rate1 * 4
+            anchor_scale2 = downsampling_rate2 * 4
+            anchor_scale3 = downsampling_rate3 * 4
+            anchor_scale4 = downsampling_rate4 * 4
             feat1 = tf.nn.l2_normalize(feat1, axis=3 if self.data_format == 'channels_last' else 1)
             feat2 = tf.nn.l2_normalize(feat2, axis=3 if self.data_format == 'channels_last' else 1)
             feat1_l2_norm = tf.get_variable('feat1_l2_norm', initializer=tf.constant(10.))
@@ -83,20 +83,20 @@ class RefineDet320:
             feat2_l2_norm = tf.get_variable('feat2_l2_norm', initializer=tf.constant(8.))
             feat2 = feat2_l2_norm * feat2
         with tf.variable_scope('ARM'):
-            arm1 = self._conv_layer(feat1, self.num_anchors*(2+4), 3, 1, 'arm1')
-            arm2 = self._conv_layer(feat2, self.num_anchors*(2+4), 3, 1, 'arm2')
-            arm3 = self._conv_layer(feat3, self.num_anchors*(2+4), 3, 1, 'arm3')
-            arm4 = self._conv_layer(feat4, self.num_anchors*(2+4), 3, 1, 'arm4')
+            arm1 = self._arm(feat1, 256, 'arm1')
+            arm2 = self._arm(feat2, 256, 'arm2')
+            arm3 = self._arm(feat3, 256, 'arm3')
+            arm4 = self._arm(feat4, 256, 'arm4')
         with tf.variable_scope('TCB'):
             tcb4 = self._tcb(feat4, 'tcb4')
             tcb3 = self._tcb(feat3, 'tcb3', tcb4)
             tcb2 = self._tcb(feat2, 'tcb2', tcb3)
             tcb1 = self._tcb(feat1, 'tcb1', tcb2)
         with tf.variable_scope('ODM'):
-            odm1 = self._conv_layer(tcb1, self.num_anchors*(self.num_classes+4), 3, 1, 'odm1')
-            odm2 = self._conv_layer(tcb2, self.num_anchors*(self.num_classes+4), 3, 1, 'odm2')
-            odm3 = self._conv_layer(tcb3, self.num_anchors*(self.num_classes+4), 3, 1, 'odm3')
-            odm4 = self._conv_layer(tcb4, self.num_anchors*(self.num_classes+4), 3, 1, 'odm4')
+            odm1 = self._odm(tcb1, 256, 'odm1')
+            odm2 = self._odm(tcb2, 256, 'odm2')
+            odm3 = self._odm(tcb3, 256, 'odm3')
+            odm4 = self._odm(tcb4, 256, 'odm4')
         with tf.variable_scope('regressor'):
             if self.data_format == 'channels_first':
                 arm1 = tf.transpose(arm1, [0, 2, 3, 1])
@@ -128,10 +128,10 @@ class RefineDet320:
             odmbbox_hw = tf.concat([odm1bbox_hw, odm2bbox_hw, odm3bbox_hw, odm4bbox_hw], axis=1)
             odmconf = tf.concat([odm1conf, odm2conf, odm3conf, odm4conf], axis=1)
 
-            a1bbox_y1x1, a1bbox_y2x2, a1bbox_yx, a1bbox_hw = self._get_abbox(anchor_scale1, p1shape)
-            a2bbox_y1x1, a2bbox_y2x2, a2bbox_yx, a2bbox_hw = self._get_abbox(anchor_scale2, p2shape)
-            a3bbox_y1x1, a3bbox_y2x2, a3bbox_yx, a3bbox_hw = self._get_abbox(anchor_scale3, p3shape)
-            a4bbox_y1x1, a4bbox_y2x2, a4bbox_yx, a4bbox_hw = self._get_abbox(anchor_scale4, p4shape)
+            a1bbox_y1x1, a1bbox_y2x2, a1bbox_yx, a1bbox_hw = self._get_abbox(anchor_scale1, p1shape, downsampling_rate1)
+            a2bbox_y1x1, a2bbox_y2x2, a2bbox_yx, a2bbox_hw = self._get_abbox(anchor_scale2, p2shape, downsampling_rate2)
+            a3bbox_y1x1, a3bbox_y2x2, a3bbox_yx, a3bbox_hw = self._get_abbox(anchor_scale3, p3shape, downsampling_rate3)
+            a4bbox_y1x1, a4bbox_y2x2, a4bbox_yx, a4bbox_hw = self._get_abbox(anchor_scale4, p4shape, downsampling_rate4)
 
             abbox_y1x1 = tf.concat([a1bbox_y1x1, a2bbox_y1x1, a3bbox_y1x1, a4bbox_y1x1], axis=0)
             abbox_y2x2 = tf.concat([a1bbox_y2x2, a2bbox_y2x2, a3bbox_y2x2, a4bbox_y2x2], axis=0)
@@ -168,8 +168,7 @@ class RefineDet320:
                 self.train_op = optimizer.minimize(self.loss, global_step=self.global_step)
             else:
                 armconf = armconf[0, ...]
-                arm_class = tf.argmax(armconf, axis=-1)
-                arm_mask = tf.greater(arm_class, 0)
+                arm_mask = armconf[:, 1] < 0.99
                 armbbox_yxt = tf.boolean_mask(armbbox_yx[0, ...], arm_mask)
                 armbbox_hwt = tf.boolean_mask(armbbox_hw[0, ...], arm_mask)
                 odmbbox_yxt = tf.boolean_mask(odmbbox_yx[0, ...], arm_mask)
@@ -186,6 +185,8 @@ class RefineDet320:
                 odmbbox_hwt = tf.boolean_mask(odmbbox_hwt, odm_mask)
                 confidence = tf.boolean_mask(odmconf, odm_mask)[:, :self.num_classes - 1]
 
+                abbox_yxt = tf.boolean_mask(abbox_yxt, odm_mask)
+                abbox_hwt = tf.boolean_mask(abbox_hwt, odm_mask)
                 darm_pbbox_yxt = armbbox_yxt * abbox_hwt + abbox_yxt
                 darm_pbbox_hwt = abbox_hwt * tf.exp(armbbox_hwt)
                 dodm_pbbox_yxt = odmbbox_yxt * darm_pbbox_hwt + darm_pbbox_yxt
@@ -336,6 +337,24 @@ class RefineDet320:
         downsampling_rate4 = 64.0
         return conv4_3, conv5_3, conv_fc7, conv6_2, downsampling_rate1, downsampling_rate2, downsampling_rate3, downsampling_rate4
 
+    def _arm(self, bottom, filters, scope):
+        with tf.variable_scope(scope):
+            conv1 = self._conv_layer(bottom, filters, 3, 1)
+            conv2 = self._conv_layer(conv1, filters, 3, 1)
+            conv3 = self._conv_layer(conv2, filters, 3, 1)
+            conv4 = self._conv_layer(conv3, filters, 3, 1)
+            pred = self._conv_layer(conv4, (2+4)*self.num_anchors, 3, 1)
+            return pred
+
+    def _odm(self, bottom, filters, scope):
+        with tf.variable_scope(scope):
+            conv1 = self._conv_layer(bottom, filters, 3, 1)
+            conv2 = self._conv_layer(conv1, filters, 3, 1)
+            conv3 = self._conv_layer(conv2, filters, 3, 1)
+            conv4 = self._conv_layer(conv3, filters, 3, 1)
+            pred = self._conv_layer(conv4, (self.num_classes+4)*self.num_anchors, 3, 1)
+            return pred
+
     def _get_armpred(self, pred):
         pred = tf.reshape(pred, [self.batch_size, -1, 2+4])
         pconf = tf.nn.softmax(pred[..., :2])
@@ -362,19 +381,19 @@ class RefineDet320:
             conv3 = self._conv_layer(conv_sum, 256, 3, 1, 'conv3', activation=tf.nn.relu)
             return conv3
 
-    def _get_abbox(self, size, pshape):
+    def _get_abbox(self, size, pshape, downsampling_rate):
         topleft_y = tf.range(0., tf.cast(pshape[1], tf.float32), dtype=tf.float32)
         topleft_x = tf.range(0., tf.cast(pshape[2], tf.float32), dtype=tf.float32)
         topleft_y = tf.reshape(topleft_y, [-1, 1, 1, 1]) + 0.5
         topleft_x = tf.reshape(topleft_x, [1, -1, 1, 1]) + 0.5
-        topleft_y = tf.tile(topleft_y, [1, pshape[2], 1, 1]) * tf.cast(self.input_size, tf.float32) / tf.cast(pshape[1], tf.float32)
-        topleft_x = tf.tile(topleft_x, [pshape[1], 1, 1, 1]) * tf.cast(self.input_size, tf.float32) / tf.cast(pshape[2], tf.float32)
+        topleft_y = tf.tile(topleft_y, [1, pshape[2], 1, 1]) * downsampling_rate
+        topleft_x = tf.tile(topleft_x, [pshape[1], 1, 1, 1]) * downsampling_rate
         topleft_yx = tf.concat([topleft_y, topleft_x], -1)
         topleft_yx = tf.tile(topleft_yx, [1, 1, self.num_anchors, 1])
 
         anchors = []
-        for i in range(self.num_anchors):
-            anchors.append([size*(self.anchor_ratios[i]**0.5), size/(self.anchor_ratios[i]**0.5)])
+        for ratio in self.anchor_ratios:
+            anchors.append([size*(ratio**0.5), size/(ratio**0.5)])
         anchors = tf.convert_to_tensor(anchors, tf.float32)
         anchors = tf.reshape(anchors, [1, 1, -1, 2])
 
@@ -432,7 +451,7 @@ class RefineDet320:
         best_mask = tf.contrib.framework.sort(best_mask)
         best_mask = tf.reshape(best_mask, [-1, 1])
         best_mask = tf.sparse.SparseTensor(tf.concat([best_mask, tf.zeros_like(best_mask)], axis=-1),
-                                          tf.squeeze(tf.ones_like(best_mask)), dense_shape=[ashape[1], 1])
+                                           tf.squeeze(tf.ones_like(best_mask)), dense_shape=[ashape[1], 1])
         best_mask = tf.reshape(tf.cast(tf.sparse.to_dense(best_mask), tf.float32), [-1])
 
         other_mask = 1. - best_mask
@@ -458,43 +477,42 @@ class RefineDet320:
         pos_abbox_hw = tf.boolean_mask(other_abbox_hw, pos_agiou_mask)
         pos_gbbox_yx = tf.gather(gbbox_yx, pos_rgindex)
         pos_gbbox_hw = tf.gather(gbbox_hw, pos_rgindex)
-        pos_armpox_yx = tf.boolean_mask(other_armbbox_yx, pos_agiou_mask)
-        pos_armpox_hw = tf.boolean_mask(other_armbbox_hw, pos_agiou_mask)
+        pos_armbbox_yx = tf.boolean_mask(other_armbbox_yx, pos_agiou_mask)
+        pos_armbbox_hw = tf.boolean_mask(other_armbbox_hw, pos_agiou_mask)
         pos_armconf = tf.boolean_mask(other_armconf, pos_agiou_mask)
-        pos_odmpox_yx = tf.boolean_mask(other_odmbbox_yx, pos_agiou_mask)
-        pos_odmpox_hw = tf.boolean_mask(other_odmbbox_hw, pos_agiou_mask)
+        pos_odmbbox_yx = tf.boolean_mask(other_odmbbox_yx, pos_agiou_mask)
+        pos_odmbbox_hw = tf.boolean_mask(other_odmbbox_hw, pos_agiou_mask)
         pos_odmconf = tf.boolean_mask(other_odmconf, pos_agiou_mask)
         pos_odmlabel = tf.gather(label, pos_rgindex)
         neg_armconf = tf.boolean_mask(other_armconf, neg_agiou_mask)
         neg_odmconf = tf.boolean_mask(other_odmconf, neg_agiou_mask)
 
-        pos_odmlabel = tf.concat([label, pos_odmlabel], axis=0)
         pos_gbbox_yx = tf.concat([gbbox_yx, pos_gbbox_yx], axis=0)
         pos_gbbox_hw = tf.concat([gbbox_hw, pos_gbbox_hw], axis=0)
-        pos_abbox_yx = tf.concat([best_abbox_yx, pos_abbox_yx], axis=0)
-        pos_abbox_hw = tf.concat([best_abbox_hw, pos_abbox_hw], axis=0)
-        pos_armbbox_yx = tf.concat([best_armbbox_yx, pos_armpox_yx], axis=0)
-        pos_armbbox_hw = tf.concat([best_armbbox_hw, pos_armpox_hw], axis=0)
+        pos_arm_abbox_yx = tf.concat([best_abbox_yx, pos_abbox_yx], axis=0)
+        pos_arm_abbox_hw = tf.concat([best_abbox_hw, pos_abbox_hw], axis=0)
+        pos_armbbox_yx = tf.concat([best_armbbox_yx, pos_armbbox_yx], axis=0)
+        pos_armbbox_hw = tf.concat([best_armbbox_hw, pos_armbbox_hw], axis=0)
         pos_armconf = tf.concat([best_armconf, pos_armconf], axis=0)
-        pos_odmbbox_yx = tf.concat([best_odmbbox_yx, pos_odmpox_yx], axis=0)
-        pos_odmbbox_hw = tf.concat([best_odmbbox_hw, pos_odmpox_hw], axis=0)
+        pos_odmbbox_yx = tf.concat([best_odmbbox_yx, pos_odmbbox_yx], axis=0)
+        pos_odmbbox_hw = tf.concat([best_odmbbox_hw, pos_odmbbox_hw], axis=0)
+        pos_odmlabel = tf.reshape(tf.concat([label, pos_odmlabel], axis=0), [-1])
         pos_odmconf = tf.concat([best_odmconf, pos_odmconf], axis=0)
 
         pos_shape = tf.shape(pos_armconf)
         neg_armshape = tf.shape(neg_armconf)
-        pos_armlabel = tf.constant([1])
+        pos_armlabel = tf.constant([0])
         pos_armlabel = tf.tile(pos_armlabel, [pos_shape[0]])
-        neg_armlabel = tf.constant([0])
+        neg_armlabel = tf.constant([1])
         neg_armlabel = tf.tile(neg_armlabel, [neg_armshape[0]])
         pos_conf_armloss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=pos_armlabel, logits=pos_armconf)
         neg_conf_armloss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=neg_armlabel, logits=neg_armconf)
-        conf_armloss = tf.reduce_mean(pos_conf_armloss) + tf.reduce_mean(neg_conf_armloss)
+        conf_armloss = tf.reduce_mean(tf.concat([pos_conf_armloss, neg_conf_armloss], axis=-1))
 
-        arm_filter_mask = neg_armconf[:, 0] < 0.99
+        arm_filter_mask = neg_armconf[:, 1] < 0.99
         neg_odmconf = tf.boolean_mask(neg_odmconf, arm_filter_mask)
-
         neg_shape = tf.shape(neg_odmconf)
-        num_pos = gshape[0] + pos_shape[0]
+        num_pos = pos_shape[0]
         num_odmneg = neg_shape[0]
         chosen_num_neg = tf.cond(num_odmneg > 3*num_pos, lambda: 3*num_pos, lambda: num_odmneg)
         neg_odmlabel = tf.constant([self.num_classes-1])
@@ -502,19 +520,18 @@ class RefineDet320:
 
         total_neg_odmloss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=neg_odmlabel, logits=neg_odmconf)
         chosen_neg_odmloss, _ = tf.nn.top_k(total_neg_odmloss, chosen_num_neg)
-        neg_conf_odmloss = tf.reduce_mean(chosen_neg_odmloss)
 
-        pos_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(pos_odmlabel, pos_odmconf, reduction=tf.losses.Reduction.MEAN)
-        conf_odmloss = neg_conf_odmloss + pos_conf_odmloss
+        pos_conf_odmloss = tf.nn.sparse_softmax_cross_entropy_with_logits(labels=pos_odmlabel, logits=pos_odmconf)
+        conf_odmloss = tf.reduce_mean(tf.concat([pos_conf_odmloss, chosen_neg_odmloss], axis=-1))
 
-        pos_truth_armbbox_yx = (pos_gbbox_yx - pos_abbox_yx) / pos_abbox_hw
-        pos_truth_armbbox_hw = tf.log(pos_gbbox_hw / pos_abbox_hw)
+        pos_truth_armbbox_yx = (pos_gbbox_yx - pos_arm_abbox_yx) / pos_arm_abbox_hw
+        pos_truth_armbbox_hw = tf.log(pos_gbbox_hw / pos_arm_abbox_hw)
         pos_yx_armloss = tf.reduce_sum(self._smooth_l1_loss(pos_armbbox_yx - pos_truth_armbbox_yx), axis=-1)
         pos_hw_armloss = tf.reduce_sum(self._smooth_l1_loss(pos_armbbox_hw - pos_truth_armbbox_hw), axis=-1)
         pos_coord_armloss = tf.reduce_mean(pos_yx_armloss + pos_hw_armloss)
 
-        pos_odm_abbox_yx = pos_abbox_hw * pos_truth_armbbox_yx + pos_abbox_yx
-        pos_odm_abbox_hw = tf.exp(pos_truth_armbbox_hw) * pos_abbox_hw
+        pos_odm_abbox_yx = pos_arm_abbox_hw * pos_armbbox_yx + pos_arm_abbox_yx
+        pos_odm_abbox_hw = tf.exp(pos_armbbox_hw) * pos_arm_abbox_hw
         pos_truth_odmbbox_yx = (pos_gbbox_yx - pos_odm_abbox_yx) / pos_odm_abbox_hw
         pos_truth_odmbbox_hw = tf.log(pos_gbbox_hw / pos_odm_abbox_hw)
         pos_yx_odmloss = tf.reduce_sum(self._smooth_l1_loss(pos_odmbbox_yx - pos_truth_odmbbox_yx), axis=-1)
@@ -543,30 +560,15 @@ class RefineDet320:
             tf.summary.scalar('loss', self.loss)
             self.summary_op = tf.summary.merge_all()
 
-    def train_one_epoch(self, lr, writer=None, data_provider=None):
+    def train_one_epoch(self, lr):
         self.is_training = True
-        if data_provider is not None:
-            self.num_train = data_provider['num_train']
-            self.train_generator = data_provider['train_generator']
-            self.train_initializer, self.train_iterator = self.train_generator
-            if data_provider['val_generator'] is not None:
-                self.num_val = data_provider['num_val']
-                self.val_generator = data_provider['val_generator']
-                self.val_initializer, self.val_iterator = self.val_generator
-            self.data_shape = data_provider['data_shape']
-            shape = [self.batch_size].extend(data_provider['data_shape'])
-            self.images.set_shape(shape)
-        self.sess.run(self.train_initializer)
         mean_loss = []
         num_iters = self.num_train // self.batch_size
         for i in range(num_iters):
-            _, loss, summaries = self.sess.run([self.train_op, self.loss, self.summary_op],
-                                               feed_dict={self.lr: lr})
-            sys.stdout.write('\r>> ' + 'iters '+str(i)+str('/')+str(num_iters)+' loss '+str(loss))
+            _, loss = self.sess.run([self.train_op, self.loss], feed_dict={self.lr: lr})
+            sys.stdout.write('\r>> ' + 'iters '+str(i+1)+str('/')+str(num_iters)+' loss '+str(loss))
             sys.stdout.flush()
             mean_loss.append(loss)
-            if writer is not None:
-                writer.add_summary(summaries, global_step=self.global_step)
         sys.stdout.write('\n')
         mean_loss = np.mean(mean_loss)
         return mean_loss
@@ -609,7 +611,7 @@ class RefineDet320:
         conv_bias = tf.nn.bias_add(conv, bias=bias, name="bias"+name)
         return tf.nn.relu(conv_bias)
 
-    def _conv_layer(self, bottom, filters, kernel_size, strides, name, dilation_rate=1, activation=None):
+    def _conv_layer(self, bottom, filters, kernel_size, strides, name=None, dilation_rate=1, activation=None):
         conv = tf.layers.conv2d(
             inputs=bottom,
             filters=filters,
@@ -625,7 +627,7 @@ class RefineDet320:
             bn = activation(bn)
         return bn
 
-    def _dconv_layer(self, bottom, filters, kernel_size, strides, name, activation=None):
+    def _dconv_layer(self, bottom, filters, kernel_size, strides, name=None, activation=None):
         conv = tf.layers.conv2d_transpose(
             inputs=bottom,
             filters=filters,
@@ -640,7 +642,7 @@ class RefineDet320:
             bn = activation(bn)
         return bn
 
-    def _max_pooling(self, bottom, pool_size, strides, name):
+    def _max_pooling(self, bottom, pool_size, strides, name=None):
         return tf.layers.max_pooling2d(
             inputs=bottom,
             pool_size=pool_size,
@@ -650,7 +652,7 @@ class RefineDet320:
             name=name
         )
 
-    def _avg_pooling(self, bottom, pool_size, strides, name):
+    def _avg_pooling(self, bottom, pool_size, strides, name=None):
         return tf.layers.average_pooling2d(
             inputs=bottom,
             pool_size=pool_size,
@@ -660,7 +662,7 @@ class RefineDet320:
             name=name
         )
 
-    def _dropout(self, bottom, name):
+    def _dropout(self, bottom, name=None):
         return tf.layers.dropout(
             inputs=bottom,
             rate=self.prob,
