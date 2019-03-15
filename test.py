@@ -41,7 +41,7 @@ image_augmentor_config = {
     'keep_aspect_ratios': True,
     'constant_values': 0.,
     'rotate_range': [-5., 5.],
-    'pad_truth_to': 10,
+    'pad_truth_to': 60,
 }
 
 data = ['./test/test_00000-of-00005.tfrecord',
