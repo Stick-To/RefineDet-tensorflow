@@ -9,7 +9,7 @@ import math
 import sys
 import random
 from utils.imagenet_classname_encoder import classname_to_ids
-from utils.image_preprocessing import image_preprocess
+from utils.image_augmentor import image_augmentor
 
 
 class ImageReader(object):
@@ -108,10 +108,10 @@ def parse_function(data, config):
         shape = tf.reshape(shape, [3])
         images = tf.image.decode_jpeg(features['image'], channels=3)
         images = tf.cast(tf.reshape(images, shape), tf.float32)
-        images = image_preprocess(image=images,
-                                  shape=shape,
-                                  **config
-                                  )
+        images = image_augmentor(image=images,
+                                 input_shape=shape,
+                                 **config
+                                 )
         return images, label, shape
 
 

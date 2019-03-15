@@ -9,7 +9,7 @@ import warnings
 import math
 import sys
 from utils.voc_classname_encoder import classname_to_ids
-from utils.image_preprocessing import image_preprocess
+from utils.image_augmentor import image_augmentor
 
 
 def int64_feature(values):
@@ -104,11 +104,11 @@ def parse_function(data, config):
         ground_truth = tf.reshape(ground_truth, [-1, 5])
         images = tf.image.decode_jpeg(features['image'], channels=3)
         images = tf.cast(tf.reshape(images, shape), tf.float32)
-        images, ground_truth = image_preprocess(image=images,
-                                                shape=shape,
-                                                ground_truth=ground_truth,
-                                                **config
-                                                )
+        images, ground_truth = image_augmentor(image=images,
+                                               input_shape=shape,
+                                               ground_truth=ground_truth,
+                                               **config
+                                               )
         return images, ground_truth
 
 

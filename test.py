@@ -10,11 +10,11 @@ import os
 # import matplotlib.patches as patches
 # from skimage import io, transform
 # from utils.voc_classname_encoder import classname_to_ids
-# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
 lr = 0.01
-batch_size = 1
-buffer_size = 2
+batch_size = 32
+buffer_size = 1024
 epochs = 300
 reduce_lr_epoch = [50, 200]
 ckpt_path = os.path.join('.', 'vgg_16.ckpt')
@@ -31,21 +31,24 @@ config = {
     'pretraining_weight': ckpt_path
 }
 
-image_preprocess_config = {
-    'data_format': 'channels_last',             # 'channels_last' ,'channels_first'
-    'target_size': [320, 320],
-    'shorter_side': 480,
-    'is_random_crop': False,
-    'random_horizontal_flip': 0.5,              # <=1.0
-    'random_vertical_flip': 0.,                 # < 1.0
-    'pad_truth_to': 60                          # >=2 ,  >= the maximum of number of bbox per image + 1
+image_augmentor_config = {
+    'data_format': 'channels_last',
+    'output_shape': [320, 320],
+    'zoom_size': [340, 340],
+    'crop_method': 'random',
+    'flip_prob': [0., 0.],
+    'fill_mode': 'BILINEAR',
+    'keep_aspect_ratios': True,
+    'constant_values': 0.,
+    'rotate_range': [-5., 5.],
+    'pad_truth_to': 10,
 }
 
 data = ['./test/test_00000-of-00005.tfrecord',
         './test/test_00001-of-00005.tfrecord']
 
 train_gen = voc_utils.get_generator(data,
-                                    batch_size, buffer_size, image_preprocess_config)
+                                    batch_size, buffer_size, image_augmentor_config)
 trainset_provider = {
     'data_shape': [320, 320, 3],
     'num_train': 5000,
@@ -63,8 +66,6 @@ for i in range(epochs):
     mean_loss = refinedet.train_one_epoch(lr)
     print('>> mean loss', mean_loss)
     refinedet.save_weight('latest', './refinedet320/test')    # 'latest' 'best'
-
-
 
 # img = io.imread('000026.jpg')
 # img = transform.resize(img, [300,300])
