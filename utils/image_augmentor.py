@@ -29,13 +29,13 @@ def image_augmentor(image, input_shape, data_format, output_shape, zoom_size=Non
         raise Exception("data_format must in ['channels_first', 'channels_last']!")
     if fill_mode not in ['CONSTANT', 'NEAREST_NEIGHBOR', 'BILINEAR', 'BICUBIC']:
         raise Exception("fill_mode must in ['CONSTANT', 'NEAREST_NEIGHBOR', 'BILINEAR', 'BICUBIC']!")
-    if fill_mode == 'CONSTANT' and zoom_size is not None:
+    if fill_mode == 'CONSTANT' and zoom_size is None:
         raise Exception("if fill_mode is 'CONSTANT', zoom_size can't be None!")
     if zoom_size is not None:
         if keep_aspect_ratios:
             if constant_values is None:
                 raise Exception('please provide constant_values!')
-        if not zoom_size[0] >= output_shape[0] and zoom_size[1] >= output_shape[1]:
+        if not (zoom_size[0] >= output_shape[0] and zoom_size[1] >= output_shape[1]):
             raise Exception("output_shape can't greater that zoom_size!")
         if crop_method not in ['random', 'center']:
             raise Exception("crop_method must in ['random', 'center']!")
@@ -43,11 +43,11 @@ def image_augmentor(image, input_shape, data_format, output_shape, zoom_size=Non
             raise Exception("please provide constant_values!")
 
     if flip_prob is not None:
-        if not 0. <= flip_prob[0] <= 1. and 0. <= flip_prob[1] <= 1.:
+        if not (0. <= flip_prob[0] <= 1. and 0. <= flip_prob[1] <= 1.):
             raise Exception("flip_prob can't less that 0.0, and can't grater that 1.0")
     if rotate_range is not None:
         if ground_truth is not None:
-            if not -5. <= rotate_range[0] <= 5. and -5. <= rotate_range[1] <= 5.:
+            if not (-5. <= rotate_range[0] <= 5. and -5. <= rotate_range[1] <= 5.):
                 raise Exception('rotate range must be -5 to 5, otherwise coordinate mapping become imprecise!')
         if not rotate_range[0] <= rotate_range[1]:
             raise Exception("rotate_range[0] can't  grater than rotate_range[1]")
