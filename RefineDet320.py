@@ -93,10 +93,10 @@ class RefineDet320:
             tcb2 = self._tcb(feat2, 'tcb2', tcb3)
             tcb1 = self._tcb(feat1, 'tcb1', tcb2)
         with tf.variable_scope('ODM'):
-            odm1 = self._odm(tcb1, 256, 'odm1')
-            odm2 = self._odm(tcb2, 256, 'odm2')
-            odm3 = self._odm(tcb3, 256, 'odm3')
-            odm4 = self._odm(tcb4, 256, 'odm4')
+            odm1 = self._odm(tcb1, 512, 'odm1')
+            odm2 = self._odm(tcb2, 512, 'odm2')
+            odm3 = self._odm(tcb3, 512, 'odm3')
+            odm4 = self._odm(tcb4, 512, 'odm4')
         with tf.variable_scope('regressor'):
             if self.data_format == 'channels_first':
                 arm1 = tf.transpose(arm1, [0, 2, 3, 1])
@@ -185,9 +185,9 @@ class RefineDet320:
                 odmbbox_yxt = tf.boolean_mask(odmbbox_yxt, odm_mask)
                 odmbbox_hwt = tf.boolean_mask(odmbbox_hwt, odm_mask)
                 confidence = tf.boolean_mask(odmconf, odm_mask)[:, :self.num_classes - 1]
-
                 abbox_yxt = tf.boolean_mask(abbox_yxt, odm_mask)
                 abbox_hwt = tf.boolean_mask(abbox_hwt, odm_mask)
+
                 darm_pbbox_yxt = armbbox_yxt * abbox_hwt + abbox_yxt
                 darm_pbbox_hwt = abbox_hwt * tf.exp(armbbox_hwt)
                 dodm_pbbox_yxt = odmbbox_yxt * darm_pbbox_hwt + darm_pbbox_yxt
@@ -219,18 +219,18 @@ class RefineDet320:
         conv1_1 = self._load_conv_layer(images,
                                         tf.get_variable(name='kernel_conv1_1',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_1/weights"),
-                                                        trainable=True),
+                                                        trainable=False),
                                         tf.get_variable(name='bias_conv1_1',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_1/biases"),
-                                                        trainable=True),
+                                                        trainable=False),
                                         name="conv1_1")
         conv1_2 = self._load_conv_layer(conv1_1,
                                         tf.get_variable(name='kernel_conv1_2',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_2/weights"),
-                                                        trainable=True),
+                                                        trainable=False),
                                         tf.get_variable(name='bias_conv1_2',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_2/biases"),
-                                                        trainable=True),
+                                                        trainable=False),
                                         name="conv1_2")
         pool1 = self._max_pooling(conv1_2, 2, 2, name="pool1")
 
@@ -328,7 +328,7 @@ class RefineDet320:
                                         name="conv5_3")
         pool5 = self._max_pooling(conv5_3, 2, 2, 'pool5')
         conv_fc6 = self._conv_layer(pool5, 512, 3, 1, 'conv_fc6', dilation_rate=2, activation=tf.nn.relu)
-        conv_fc7 = self._conv_layer(conv_fc6, 512, 1, 1, 'conv_fc7', dilation_rate=2, activation=tf.nn.relu)
+        conv_fc7 = self._conv_layer(conv_fc6, 512, 1, 1, 'conv_fc7', activation=tf.nn.relu)
         conv6_1 = self._conv_layer(conv_fc7, 1024, 1, 2, 'conv6_1', activation=tf.nn.relu)
         conv6_2 = self._conv_layer(conv6_1, 1024, 3, 1, 'conv6_2', activation=tf.nn.relu)
 
@@ -470,7 +470,7 @@ class RefineDet320:
         other_agiou_rate = tf.boolean_mask(agiou_rate, other_mask)
         best_agiou_rate = tf.reduce_max(other_agiou_rate, axis=1)
         pos_agiou_mask = best_agiou_rate > 0.5
-        neg_agiou_mask = best_agiou_rate <= 0.5
+        neg_agiou_mask = (1. - tf.cast(pos_agiou_mask, tf.float32)) > 0.
         rgindex = tf.argmax(other_agiou_rate, axis=1)
 
         pos_rgindex = tf.boolean_mask(rgindex, pos_agiou_mask)
@@ -501,29 +501,32 @@ class RefineDet320:
         pos_odmconf = tf.concat([best_odmconf, pos_odmconf], axis=0)
 
         pos_shape = tf.shape(pos_armconf)
+        num_pos = pos_shape[0]
         neg_armshape = tf.shape(neg_armconf)
+        num_armneg = neg_armshape[0]
         pos_armlabel = tf.constant([0])
         pos_armlabel = tf.tile(pos_armlabel, [pos_shape[0]])
         neg_armlabel = tf.constant([1])
-        neg_armlabel = tf.tile(neg_armlabel, [neg_armshape[0]])
+        neg_armlabel = tf.tile(neg_armlabel, [num_armneg])
         pos_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_armlabel, logits=pos_armconf, reduction=tf.losses.Reduction.NONE)
         neg_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_armlabel, logits=neg_armconf, reduction=tf.losses.Reduction.NONE)
-        conf_armloss = tf.reduce_mean(tf.concat([pos_conf_armloss, neg_conf_armloss], axis=-1))
+        chosen_num_armneg = tf.cond(num_armneg > 3*num_pos, lambda: 3*num_pos, lambda: num_armneg)
+        chosen_neg_conf_armloss, _ = tf.nn.top_k(neg_conf_armloss, chosen_num_armneg)
+        conf_armloss = tf.reduce_mean(tf.concat([pos_conf_armloss, chosen_neg_conf_armloss], axis=-1))
 
         arm_filter_mask = tf.nn.softmax(neg_armconf)[:, 1] < 0.99
         neg_odmconf = tf.boolean_mask(neg_odmconf, arm_filter_mask)
-        neg_shape = tf.shape(neg_odmconf)
-        num_pos = pos_shape[0]
-        num_odmneg = neg_shape[0]
-        chosen_num_neg = tf.cond(num_odmneg > 3*num_pos, lambda: 3*num_pos, lambda: num_odmneg)
+        neg_odmshape = tf.shape(neg_odmconf)
+        
+        num_odmneg = neg_odmshape[0]
+        
         neg_odmlabel = tf.constant([self.num_classes-1])
         neg_odmlabel = tf.tile(neg_odmlabel, [num_odmneg])
-
-        total_neg_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_odmlabel, logits=neg_odmconf, reduction=tf.losses.Reduction.NONE)
-        chosen_neg_odmloss, _ = tf.nn.top_k(total_neg_odmloss, chosen_num_neg)
-
+        chosen_num_odmneg = tf.cond(num_odmneg > 3*num_pos, lambda: 3*num_pos, lambda: num_odmneg)
+        neg_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_odmlabel, logits=neg_odmconf, reduction=tf.losses.Reduction.NONE)
         pos_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_odmlabel, logits=pos_odmconf, reduction=tf.losses.Reduction.NONE)
-        conf_odmloss = tf.reduce_mean(tf.concat([pos_conf_odmloss, chosen_neg_odmloss], axis=-1))
+        chosen_neg_conf_odmloss, _ = tf.nn.top_k(neg_conf_odmloss, chosen_num_odmneg)
+        conf_odmloss = tf.reduce_mean(tf.concat([pos_conf_odmloss, chosen_neg_conf_odmloss], axis=-1))
 
         pos_truth_armbbox_yx = (pos_gbbox_yx - pos_arm_abbox_yx) / pos_arm_abbox_hw
         pos_truth_armbbox_hw = tf.log(pos_gbbox_hw / pos_arm_abbox_hw)

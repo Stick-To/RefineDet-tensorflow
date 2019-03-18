@@ -23,19 +23,19 @@ def image_augmentor(image, input_shape, data_format, output_shape, zoom_size=Non
     :param ground_truth: [ymin, ymax, xmin, xmax, classid]
     :param pad_truth_to: pad ground_truth to size [pad_truth_to, 5] with -1
     :return image: output_shape
-    :return ground_truth: [pad_truth_to, 5]
+    :return ground_truth: [pad_truth_to, 5] [ycenter, xcenter, h, w, class_id]
     """
     if data_format not in ['channels_first', 'channels_last']:
         raise Exception("data_format must in ['channels_first', 'channels_last']!")
     if fill_mode not in ['CONSTANT', 'NEAREST_NEIGHBOR', 'BILINEAR', 'BICUBIC']:
         raise Exception("fill_mode must in ['CONSTANT', 'NEAREST_NEIGHBOR', 'BILINEAR', 'BICUBIC']!")
-    if fill_mode == 'CONSTANT' and zoom_size is None:
+    if fill_mode == 'CONSTANT' and zoom_size is not None:
         raise Exception("if fill_mode is 'CONSTANT', zoom_size can't be None!")
     if zoom_size is not None:
         if keep_aspect_ratios:
             if constant_values is None:
                 raise Exception('please provide constant_values!')
-        if not (zoom_size[0] >= output_shape[0] and zoom_size[1] >= output_shape[1]):
+        if not zoom_size[0] >= output_shape[0] and zoom_size[1] >= output_shape[1]:
             raise Exception("output_shape can't greater that zoom_size!")
         if crop_method not in ['random', 'center']:
             raise Exception("crop_method must in ['random', 'center']!")
@@ -43,11 +43,11 @@ def image_augmentor(image, input_shape, data_format, output_shape, zoom_size=Non
             raise Exception("please provide constant_values!")
 
     if flip_prob is not None:
-        if not (0. <= flip_prob[0] <= 1. and 0. <= flip_prob[1] <= 1.):
+        if not 0. <= flip_prob[0] <= 1. and 0. <= flip_prob[1] <= 1.:
             raise Exception("flip_prob can't less that 0.0, and can't grater that 1.0")
     if rotate_range is not None:
         if ground_truth is not None:
-            if not (-5. <= rotate_range[0] <= 5. and -5. <= rotate_range[1] <= 5.):
+            if not -5. <= rotate_range[0] <= 5. and -5. <= rotate_range[1] <= 5.:
                 raise Exception('rotate range must be -5 to 5, otherwise coordinate mapping become imprecise!')
         if not rotate_range[0] <= rotate_range[1]:
             raise Exception("rotate_range[0] can't  grater than rotate_range[1]")
@@ -170,21 +170,17 @@ def image_augmentor(image, input_shape, data_format, output_shape, zoom_size=Non
             xminymax_y = xmin * tf.sin(angles) + ymax * tf.cos(angles) + offset_y
             xmaxymin_x = xmax * tf.cos(angles) - ymin * tf.sin(angles) + offset_x
             xmaxymin_y = xmax * tf.sin(angles) + ymin * tf.cos(angles) + offset_y
-            xmin = tf.reduce_min([xminymin_x, xmaxymax_x, xminymax_x, xmaxymin_x], axis=0)
-            ymin = tf.reduce_min([xminymin_y, xmaxymax_y, xminymax_y, xmaxymin_y], axis=0)
-            xmax = tf.reduce_max([xminymin_x, xmaxymax_x, xminymax_x, xmaxymin_x], axis=0)
-            ymax = tf.reduce_max([xminymin_y, xmaxymax_y, xminymax_y, xmaxymin_y], axis=0)
-            xmin = tf.reshape(xmin, [-1, 1])
-            xmax = tf.reshape(xmax, [-1, 1])
-            ymin = tf.reshape(ymin, [-1, 1])
-            ymax = tf.reshape(ymax, [-1, 1])
+            xmin = tf.reduce_min(tf.concat([xminymin_x, xmaxymax_x, xminymax_x, xmaxymin_x], axis=-1), axis=-1, keepdims=True)
+            ymin = tf.reduce_min(tf.concat([xminymin_y, xmaxymax_y, xminymax_y, xmaxymin_y], axis=-1), axis=-1, keepdims=True)
+            xmax = tf.reduce_max(tf.concat([xminymin_x, xmaxymax_x, xminymax_x, xmaxymin_x], axis=-1), axis=-1, keepdims=True)
+            ymax = tf.reduce_max(tf.concat([xminymin_y, xmaxymax_y, xminymax_y, xmaxymin_y], axis=-1), axis=-1, keepdims=True)
     if data_format == 'channels_first':
         image = tf.transpose(image, [2, 0, 1])
     if ground_truth is not None:
         y_center = (ymin + ymax) / 2.
         x_center = (xmin + xmax) / 2.
-        y_mask = tf.cast(y_center > 0., tf.float32) * tf.cast(y_center < output_h - 1., tf.float32)
-        x_mask = tf.cast(x_center > 0., tf.float32) * tf.cast(x_center < output_w - 1., tf.float32)
+        y_mask = tf.cast(y_center >= 0., tf.float32) * tf.cast(y_center <= output_h - 1., tf.float32)
+        x_mask = tf.cast(x_center >= 0., tf.float32) * tf.cast(x_center <= output_w - 1., tf.float32)
         mask = tf.reshape((x_mask * y_mask) > 0., [-1])
         ymin = tf.boolean_mask(ymin, mask)
         xmin = tf.boolean_mask(xmin, mask)
@@ -199,7 +195,11 @@ def image_augmentor(image, input_shape, data_format, output_shape, zoom_size=Non
         xmin = tf.where(xmin > output_w - 1., xmin - xmin + output_w - 1., xmin)
         ymax = tf.where(ymax > output_h - 1., ymax - ymax + output_h - 1., ymax)
         xmax = tf.where(xmax > output_w - 1., xmax - xmax + output_w - 1., xmax)
-        ground_truth = tf.concat([ymin, xmin, ymax, xmax, class_id], axis=-1)
+        y = (ymin + ymax) / 2.
+        x = (xmin + xmax) / 2.
+        h = ymax - ymin
+        w = xmax - xmin
+        ground_truth = tf.concat([y, x, h, w, class_id], axis=-1)
 
         if pad_truth_to is not None:
             ground_truth = tf.pad(
