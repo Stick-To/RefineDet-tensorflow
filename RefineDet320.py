@@ -328,8 +328,8 @@ class RefineDet320:
                                         name="conv5_3")
         pool5 = self._max_pooling(conv5_3, 2, 2, 'pool5')
         conv_fc6 = self._conv_layer(pool5, 512, 3, 1, 'conv_fc6', dilation_rate=2, activation=tf.nn.relu)
-        conv_fc7 = self._conv_layer(conv_fc6, 512, 1, 1, 'conv_fc7', activation=tf.nn.relu)
-        conv6_1 = self._conv_layer(conv_fc7, 1024, 1, 2, 'conv6_1', activation=tf.nn.relu)
+        conv_fc7 = self._conv_layer(conv_fc6, 512, 3, 1, 'conv_fc7', activation=tf.nn.relu)
+        conv6_1 = self._conv_layer(conv_fc7, 1024, 3, 2, 'conv6_1', activation=tf.nn.relu)
         conv6_2 = self._conv_layer(conv6_1, 1024, 3, 1, 'conv6_2', activation=tf.nn.relu)
 
         downsampling_rate1 = 8.0
@@ -340,14 +340,16 @@ class RefineDet320:
 
     def _arm(self, bottom, filters, scope):
         with tf.variable_scope(scope):
-            conv = self._conv_layer(bottom, filters, 3, 1)
-            pred = self._conv_layer(conv, (2+4)*self.num_anchors, 3, 1)
-            return pred, conv
+            conv1 = self._conv_layer(bottom, filters, 3, 1, activation=tf.nn.relu)
+            conv2 = self._conv_layer(conv1, filters, 3, 1, activation=tf.nn.relu)
+            pred = self._conv_layer(conv2, (2+4)*self.num_anchors, 3, 1)
+            return pred, conv2
 
     def _odm(self, bottom, filters, scope):
         with tf.variable_scope(scope):
-            conv = self._conv_layer(bottom, filters, 3, 1)
-            pred = self._conv_layer(conv, (self.num_classes+4)*self.num_anchors, 3, 1)
+            conv1 = self._conv_layer(bottom, filters, 3, 1, activation=tf.nn.relu)
+            conv2 = self._conv_layer(conv1, filters, 3, 1, activation=tf.nn.relu)
+            pred = self._conv_layer(conv2, (self.num_classes+4)*self.num_anchors, 3, 1)
             return pred
 
     def _get_armpred(self, pred):
@@ -464,7 +466,7 @@ class RefineDet320:
         other_agiou_rate = tf.boolean_mask(agiou_rate, other_mask)
         best_agiou_rate = tf.reduce_max(other_agiou_rate, axis=1)
         pos_agiou_mask = best_agiou_rate > 0.5
-        neg_agiou_mask = best_agiou_rate <= 0.5
+        neg_agiou_mask = (1. - tf.cast(pos_agiou_mask, tf.float32)) > 0.
         rgindex = tf.argmax(other_agiou_rate, axis=1)
 
         pos_rgindex = tf.boolean_mask(rgindex, pos_agiou_mask)
@@ -511,9 +513,8 @@ class RefineDet320:
         arm_filter_mask = tf.nn.softmax(neg_armconf)[:, 1] < 0.99
         neg_odmconf = tf.boolean_mask(neg_odmconf, arm_filter_mask)
         neg_odmshape = tf.shape(neg_odmconf)
-        
         num_odmneg = neg_odmshape[0]
-        
+
         neg_odmlabel = tf.constant([self.num_classes-1])
         neg_odmlabel = tf.tile(neg_odmlabel, [num_odmneg])
         chosen_num_odmneg = tf.cond(num_odmneg > 3*num_pos, lambda: 3*num_pos, lambda: num_odmneg)
