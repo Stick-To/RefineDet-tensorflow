@@ -83,21 +83,21 @@ class RefineDet320:
             feat2_l2_norm = tf.get_variable('feat2_l2_norm', initializer=tf.constant(8.))
             feat2 = feat2_l2_norm * feat2
         with tf.variable_scope('ARM'):
-            arm1 = self._arm(feat1, 256, 'arm1')
-            arm2 = self._arm(feat2, 256, 'arm2')
-            arm3 = self._arm(feat3, 256, 'arm3')
-            arm4 = self._arm(feat4, 256, 'arm4')
+            arm1, armfeat1 = self._arm(feat1, 256, 'arm1')
+            arm2, armfeat2 = self._arm(feat2, 256, 'arm2')
+            arm3, armfeat3 = self._arm(feat3, 256, 'arm3')
+            arm4, armfeat4 = self._arm(feat4, 256, 'arm4')
         with tf.variable_scope('TCB'):
-            tcb4 = self._tcb(feat4, 'tcb4')
-            tcb3 = self._tcb(feat3, 'tcb3', tcb4)
-            tcb2 = self._tcb(feat2, 'tcb2', tcb3)
-            tcb1 = self._tcb(feat1, 'tcb1', tcb2)
+            tcb4 = self._tcb(armfeat4, 'tcb4')
+            tcb3 = self._tcb(armfeat3, 'tcb3', tcb4)
+            tcb2 = self._tcb(armfeat2, 'tcb2', tcb3)
+            tcb1 = self._tcb(armfeat1, 'tcb1', tcb2)
         with tf.variable_scope('ODM'):
-            odm1 = self._odm(tcb1, 512, 'odm1')
-            odm2 = self._odm(tcb2, 512, 'odm2')
-            odm3 = self._odm(tcb3, 512, 'odm3')
-            odm4 = self._odm(tcb4, 512, 'odm4')
-        with tf.variable_scope('regressor'):
+            odm1 = self._odm(tcb1, 256, 'odm1')
+            odm2 = self._odm(tcb2, 256, 'odm2')
+            odm3 = self._odm(tcb3, 256, 'odm3')
+            odm4 = self._odm(tcb4, 256, 'odm4')
+        with tf.variable_scope('predictor'):
             if self.data_format == 'channels_first':
                 arm1 = tf.transpose(arm1, [0, 2, 3, 1])
                 arm2 = tf.transpose(arm2, [0, 2, 3, 1])
@@ -111,7 +111,7 @@ class RefineDet320:
             p2shape = tf.shape(odm2)
             p3shape = tf.shape(odm3)
             p4shape = tf.shape(odm4)
-        with tf.variable_scope('inference'):
+
             arm1bbox_yx, arm1bbox_hw, arm1conf = self._get_armpred(arm1)
             arm2bbox_yx, arm2bbox_hw, arm2conf = self._get_armpred(arm2)
             arm3bbox_yx, arm3bbox_hw, arm3conf = self._get_armpred(arm3)
@@ -219,18 +219,18 @@ class RefineDet320:
         conv1_1 = self._load_conv_layer(images,
                                         tf.get_variable(name='kernel_conv1_1',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_1/weights"),
-                                                        trainable=False),
+                                                        trainable=True),
                                         tf.get_variable(name='bias_conv1_1',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_1/biases"),
-                                                        trainable=False),
+                                                        trainable=True),
                                         name="conv1_1")
         conv1_2 = self._load_conv_layer(conv1_1,
                                         tf.get_variable(name='kernel_conv1_2',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_2/weights"),
-                                                        trainable=False),
+                                                        trainable=True),
                                         tf.get_variable(name='bias_conv1_2',
                                                         initializer=self.reader.get_tensor("vgg_16/conv1/conv1_2/biases"),
-                                                        trainable=False),
+                                                        trainable=True),
                                         name="conv1_2")
         pool1 = self._max_pooling(conv1_2, 2, 2, name="pool1")
 
@@ -340,20 +340,14 @@ class RefineDet320:
 
     def _arm(self, bottom, filters, scope):
         with tf.variable_scope(scope):
-            conv1 = self._conv_layer(bottom, filters, 3, 1)
-            conv2 = self._conv_layer(conv1, filters, 3, 1)
-            conv3 = self._conv_layer(conv2, filters, 3, 1)
-            conv4 = self._conv_layer(conv3, filters, 3, 1)
-            pred = self._conv_layer(conv4, (2+4)*self.num_anchors, 3, 1)
-            return pred
+            conv = self._conv_layer(bottom, filters, 3, 1)
+            pred = self._conv_layer(conv, (2+4)*self.num_anchors, 3, 1)
+            return pred, conv
 
     def _odm(self, bottom, filters, scope):
         with tf.variable_scope(scope):
-            conv1 = self._conv_layer(bottom, filters, 3, 1)
-            conv2 = self._conv_layer(conv1, filters, 3, 1)
-            conv3 = self._conv_layer(conv2, filters, 3, 1)
-            conv4 = self._conv_layer(conv3, filters, 3, 1)
-            pred = self._conv_layer(conv4, (self.num_classes+4)*self.num_anchors, 3, 1)
+            conv = self._conv_layer(bottom, filters, 3, 1)
+            pred = self._conv_layer(conv, (self.num_classes+4)*self.num_anchors, 3, 1)
             return pred
 
     def _get_armpred(self, pred):
@@ -470,7 +464,7 @@ class RefineDet320:
         other_agiou_rate = tf.boolean_mask(agiou_rate, other_mask)
         best_agiou_rate = tf.reduce_max(other_agiou_rate, axis=1)
         pos_agiou_mask = best_agiou_rate > 0.5
-        neg_agiou_mask = (1. - tf.cast(pos_agiou_mask, tf.float32)) > 0.
+        neg_agiou_mask = best_agiou_rate <= 0.5
         rgindex = tf.argmax(other_agiou_rate, axis=1)
 
         pos_rgindex = tf.boolean_mask(rgindex, pos_agiou_mask)
