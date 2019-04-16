@@ -83,43 +83,51 @@ class RefineDet320:
             feat2_l2_norm = tf.get_variable('feat2_l2_norm', initializer=tf.constant(8.), trainable=True)
             feat2 = feat2_l2_norm * feat2
         with tf.variable_scope('ARM'):
-            arm1, armfeat1 = self._arm(feat1, 'arm1')
-            arm2, armfeat2 = self._arm(feat2, 'arm2')
-            arm3, armfeat3 = self._arm(feat3, 'arm3')
-            arm4, armfeat4 = self._arm(feat4, 'arm4')
+            arm1_loc, arm1_conf = self._arm(feat1, 'arm1')
+            arm2_loc, arm2_conf = self._arm(feat2, 'arm2')
+            arm3_loc, arm3_conf = self._arm(feat3, 'arm3')
+            arm4_loc, arm4_conf = self._arm(feat4, 'arm4')
         with tf.variable_scope('TCB'):
-            tcb4 = self._tcb(armfeat4, 'tcb4')
-            tcb3 = self._tcb(armfeat3, 'tcb3', tcb4)
-            tcb2 = self._tcb(armfeat2, 'tcb2', tcb3)
-            tcb1 = self._tcb(armfeat1, 'tcb1', tcb2)
+            tcb4 = self._tcb(feat4, 'tcb4')
+            tcb3 = self._tcb(feat3, 'tcb3', tcb4)
+            tcb2 = self._tcb(feat2, 'tcb2', tcb3)
+            tcb1 = self._tcb(feat1, 'tcb1', tcb2)
         with tf.variable_scope('ODM'):
-            odm1 = self._odm(tcb1, 'odm1')
-            odm2 = self._odm(tcb2, 'odm2')
-            odm3 = self._odm(tcb3, 'odm3')
-            odm4 = self._odm(tcb4, 'odm4')
+            odm1_loc, odm1_conf = self._odm(tcb1, 'odm1')
+            odm2_loc, odm2_conf = self._odm(tcb2, 'odm2')
+            odm3_loc, odm3_conf = self._odm(tcb3, 'odm3')
+            odm4_loc, odm4_conf = self._odm(tcb4, 'odm4')
         with tf.variable_scope('predictor'):
             if self.data_format == 'channels_first':
-                arm1 = tf.transpose(arm1, [0, 2, 3, 1])
-                arm2 = tf.transpose(arm2, [0, 2, 3, 1])
-                arm3 = tf.transpose(arm3, [0, 2, 3, 1])
-                arm4 = tf.transpose(arm4, [0, 2, 3, 1])
-                odm1 = tf.transpose(odm1, [0, 2, 3, 1])
-                odm2 = tf.transpose(odm2, [0, 2, 3, 1])
-                odm3 = tf.transpose(odm3, [0, 2, 3, 1])
-                odm4 = tf.transpose(odm4, [0, 2, 3, 1])
-            p1shape = tf.shape(odm1)
-            p2shape = tf.shape(odm2)
-            p3shape = tf.shape(odm3)
-            p4shape = tf.shape(odm4)
+                arm1_loc = tf.transpose(arm1_loc, [0, 2, 3, 1])
+                arm2_loc = tf.transpose(arm2_loc, [0, 2, 3, 1])
+                arm3_loc = tf.transpose(arm3_loc, [0, 2, 3, 1])
+                arm4_loc = tf.transpose(arm4_loc, [0, 2, 3, 1])
+                arm1_conf = tf.transpose(arm1_conf, [0, 2, 3, 1])
+                arm2_conf = tf.transpose(arm2_conf, [0, 2, 3, 1])
+                arm3_conf = tf.transpose(arm3_conf, [0, 2, 3, 1])
+                arm4_conf = tf.transpose(arm4_conf, [0, 2, 3, 1])
+                odm1_loc = tf.transpose(odm1_loc, [0, 2, 3, 1])
+                odm2_loc = tf.transpose(odm2_loc, [0, 2, 3, 1])
+                odm3_loc = tf.transpose(odm3_loc, [0, 2, 3, 1])
+                odm4_loc = tf.transpose(odm4_loc, [0, 2, 3, 1])
+                odm1_conf = tf.transpose(odm3_conf, [0, 2, 3, 1])
+                odm2_conf = tf.transpose(odm2_conf, [0, 2, 3, 1])
+                odm3_conf = tf.transpose(odm3_conf, [0, 2, 3, 1])
+                odm4_conf = tf.transpose(odm4_conf, [0, 2, 3, 1])
+            p1shape = tf.shape(arm1_loc)
+            p2shape = tf.shape(arm2_loc)
+            p3shape = tf.shape(arm3_loc)
+            p4shape = tf.shape(arm4_loc)
 
-            arm1bbox_yx, arm1bbox_hw, arm1conf = self._get_armpred(arm1)
-            arm2bbox_yx, arm2bbox_hw, arm2conf = self._get_armpred(arm2)
-            arm3bbox_yx, arm3bbox_hw, arm3conf = self._get_armpred(arm3)
-            arm4bbox_yx, arm4bbox_hw, arm4conf = self._get_armpred(arm4)
-            odm1bbox_yx, odm1bbox_hw, odm1conf = self._get_odmpred(odm1)
-            odm2bbox_yx, odm2bbox_hw, odm2conf = self._get_odmpred(odm2)
-            odm3bbox_yx, odm3bbox_hw, odm3conf = self._get_odmpred(odm3)
-            odm4bbox_yx, odm4bbox_hw, odm4conf = self._get_odmpred(odm4)
+            arm1bbox_yx, arm1bbox_hw, arm1conf = self._get_armpred(arm1_loc, arm1_conf)
+            arm2bbox_yx, arm2bbox_hw, arm2conf = self._get_armpred(arm2_loc, arm2_conf)
+            arm3bbox_yx, arm3bbox_hw, arm3conf = self._get_armpred(arm3_loc, arm3_conf)
+            arm4bbox_yx, arm4bbox_hw, arm4conf = self._get_armpred(arm4_loc, arm4_conf)
+            odm1bbox_yx, odm1bbox_hw, odm1conf = self._get_odmpred(odm1_loc, odm1_conf)
+            odm2bbox_yx, odm2bbox_hw, odm2conf = self._get_odmpred(odm2_loc, odm2_conf)
+            odm3bbox_yx, odm3bbox_hw, odm3conf = self._get_odmpred(odm3_loc, odm3_conf)
+            odm4bbox_yx, odm4bbox_hw, odm4conf = self._get_odmpred(odm4_loc, odm4_conf)
 
             armbbox_yx = tf.concat([arm1bbox_yx, arm2bbox_yx, arm3bbox_yx, arm4bbox_yx], axis=1)
             armbbox_hw = tf.concat([arm1bbox_hw, arm2bbox_hw, arm3bbox_hw, arm4bbox_hw], axis=1)
@@ -167,26 +175,25 @@ class RefineDet320:
                 )
                 self.train_op = optimizer.minimize(self.loss, global_step=self.global_step)
             else:
-                armconf = tf.nn.softmax(armconf[0, ...])
-                odmconf = tf.nn.softmax(odmconf[0, ...])
-                arm_mask = armconf[:, 1] < 0.99
-                armbbox_yxt = tf.boolean_mask(armbbox_yx[0, ...], arm_mask)
-                armbbox_hwt = tf.boolean_mask(armbbox_hw[0, ...], arm_mask)
-                odmbbox_yxt = tf.boolean_mask(odmbbox_yx[0, ...], arm_mask)
-                odmbbox_hwt = tf.boolean_mask(odmbbox_hw[0, ...], arm_mask)
-                odmconf = tf.boolean_mask(odmconf, arm_mask)
-                abbox_yxt = tf.boolean_mask(abbox_yx, arm_mask)
-                abbox_hwt = tf.boolean_mask(abbox_hw, arm_mask)
+                armconft = tf.nn.softmax(odmconf[0, ...])
+                odmconft = tf.nn.softmax(odmconf[0, ...])
+                arm_maskt = armconft[:, 1] < 0.99
+                armbbox_yxt = tf.boolean_mask(armbbox_yx[0, ...], arm_maskt)
+                armbbox_hwt = tf.boolean_mask(armbbox_hw[0, ...], arm_maskt)
+                odmbbox_yxt = tf.boolean_mask(odmbbox_yx[0, ...], arm_maskt)
+                odmbbox_hwt = tf.boolean_mask(odmbbox_hw[0, ...], arm_maskt)
+                abbox_yxt = tf.boolean_mask(abbox_yx, arm_maskt)
+                abbox_hwt = tf.boolean_mask(abbox_hw, arm_maskt)
 
-                odm_class = tf.argmax(odmconf, axis=-1)
-                odm_mask = tf.less(odm_class, self.num_classes - 1)
-                armbbox_yxt = tf.boolean_mask(armbbox_yxt, odm_mask)
-                armbbox_hwt = tf.boolean_mask(armbbox_hwt, odm_mask)
-                odmbbox_yxt = tf.boolean_mask(odmbbox_yxt, odm_mask)
-                odmbbox_hwt = tf.boolean_mask(odmbbox_hwt, odm_mask)
-                confidence = tf.boolean_mask(odmconf, odm_mask)[:, :self.num_classes - 1]
-                abbox_yxt = tf.boolean_mask(abbox_yxt, odm_mask)
-                abbox_hwt = tf.boolean_mask(abbox_hwt, odm_mask)
+                odm_class_id = tf.argmax(odmconft, axis=-1)
+                odm_maskt = tf.less(odm_class_id, self.num_classes - 1)
+                armbbox_yxt = tf.boolean_mask(armbbox_yxt, odm_maskt)
+                armbbox_hwt = tf.boolean_mask(armbbox_hwt, odm_maskt)
+                odmbbox_yxt = tf.boolean_mask(odmbbox_yxt, odm_maskt)
+                odmbbox_hwt = tf.boolean_mask(odmbbox_hwt, odm_maskt)
+                confidence = tf.boolean_mask(odmconft, odm_maskt)[:, :self.num_classes - 1]
+                abbox_yxt = tf.boolean_mask(abbox_yxt, odm_maskt)
+                abbox_hwt = tf.boolean_mask(abbox_hwt, odm_maskt)
 
                 darm_pbbox_yxt = armbbox_yxt * abbox_hwt + abbox_yxt
                 darm_pbbox_hwt = abbox_hwt * tf.exp(armbbox_hwt)
@@ -326,9 +333,9 @@ class RefineDet320:
                                                         initializer=self.reader.get_tensor("vgg_16/conv5/conv5_3/biases"),
                                                         trainable=True),
                                         name="conv5_3")
-        pool5 = self._max_pooling(conv5_3, 2, 2, 'pool5')
+        pool5 = self._max_pooling(conv5_3, 3, 2, 'pool5')
         conv_fc6 = self._conv_layer(pool5, 512, 3, 1, 'conv_fc6', dilation_rate=2, activation=tf.nn.relu)
-        conv_fc7 = self._conv_layer(conv_fc6, 512, 3, 1, 'conv_fc7',dilation_rate=2, activation=tf.nn.relu)
+        conv_fc7 = self._conv_layer(conv_fc6, 512, 3, 1, 'conv_fc7', dilation_rate=2, activation=tf.nn.relu)
         conv6_1 = self._conv_layer(conv_fc7, 1024, 3, 2, 'conv6_1', activation=tf.nn.relu)
         conv6_2 = self._conv_layer(conv6_1, 1024, 3, 1, 'conv6_2', activation=tf.nn.relu)
 
@@ -340,8 +347,11 @@ class RefineDet320:
 
     def _arm(self, bottom, scope):
         with tf.variable_scope(scope):
-            pred = self._conv_layer(bottom, (2+4)*self.num_anchors, 3, 1)
-            return pred, bottom
+            conv1 = self._conv_layer(bottom, 512, 3, 1, activation=tf.nn.relu)
+            conv2 = self._conv_layer(conv1, 512, 3, 1, activation=tf.nn.relu)
+            pred_loc = self._conv_layer(conv2, 4*self.num_anchors, 3, 1)
+            pred_conf = self._conv_layer(conv2, 2*self.num_anchors, 3, 1)
+            return pred_loc, pred_conf
 
     def _tcb(self, feat, scope, high_level_feat=None):
         with tf.variable_scope(scope):
@@ -357,21 +367,24 @@ class RefineDet320:
 
     def _odm(self, bottom, scope):
         with tf.variable_scope(scope):
-            pred = self._conv_layer(bottom, (self.num_classes+4)*self.num_anchors, 3, 1)
-            return pred
+            conv1 = self._conv_layer(bottom, 256, 3, 1, activation=tf.nn.relu)
+            conv2 = self._conv_layer(conv1, 256, 3, 1, activation=tf.nn.relu)
+            pred_loc = self._conv_layer(conv2, 4*self.num_anchors, 3, 1)
+            pred_conf = self._conv_layer(conv2, self.num_classes*self.num_anchors, 3, 1)
+            return pred_loc, pred_conf
 
-    def _get_armpred(self, pred):
-        pred = tf.reshape(pred, [self.batch_size, -1, 2+4])
-        pconf = pred[..., :2]
-        pbbox_yx = pred[..., 2:2+2]
-        pbbox_hw = pred[..., 2+2:]
+    def _get_armpred(self, pred_loc, pred_conf):
+        pconf = tf.reshape(pred_conf, [self.batch_size, -1, 2])
+        ploc = tf.reshape(pred_loc, [self.batch_size, -1, 4])
+        pbbox_yx = ploc[..., :2]
+        pbbox_hw = ploc[..., 2:]
         return pbbox_yx, pbbox_hw, pconf
 
-    def _get_odmpred(self, pred):
-        pred = tf.reshape(pred, [self.batch_size, -1, self.num_classes+4])
-        pconf = pred[..., :self.num_classes]
-        pbbox_yx = pred[..., self.num_classes:self.num_classes+2]
-        pbbox_hw = pred[..., self.num_classes+2:]
+    def _get_odmpred(self, pred_loc, pred_conf):
+        pconf = tf.reshape(pred_conf, [self.batch_size, -1, self.num_classes])
+        ploc = tf.reshape(pred_loc, [self.batch_size, -1, 4])
+        pbbox_yx = ploc[..., :2]
+        pbbox_hw = ploc[..., 2:]
         return pbbox_yx, pbbox_hw, pconf
 
     def _get_abbox(self, size, pshape, downsampling_rate):
@@ -462,7 +475,7 @@ class RefineDet320:
         other_agiou_rate = tf.boolean_mask(agiou_rate, other_mask)
         max_agiou_rate = tf.reduce_max(other_agiou_rate, axis=1)
         pos_agiou_mask = max_agiou_rate > 0.5
-        neg_agiou_mask = max_agiou_rate < 0.3
+        neg_agiou_mask = max_agiou_rate < 0.5
         rgindex = tf.argmax(other_agiou_rate, axis=1)
 
         pos_rgindex = tf.boolean_mask(rgindex, pos_agiou_mask)
@@ -498,11 +511,11 @@ class RefineDet320:
         pos_armlabel = tf.tile(pos_armlabel, [num_pos])
         neg_armlabel = tf.constant([1])
         neg_armlabel = tf.tile(neg_armlabel, [num_armneg])
-        pos_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_armlabel, logits=pos_armconf, reduction=tf.losses.Reduction.NONE)
+        pos_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_armlabel, logits=pos_armconf, reduction=tf.losses.Reduction.MEAN)
         neg_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_armlabel, logits=neg_armconf, reduction=tf.losses.Reduction.NONE)
         chosen_num_armneg = tf.cond(num_armneg > 3*num_pos, lambda: 3*num_pos, lambda: num_armneg)
         chosen_neg_conf_armloss, _ = tf.nn.top_k(neg_conf_armloss, chosen_num_armneg)
-        conf_armloss = tf.reduce_mean(tf.concat([pos_conf_armloss, chosen_neg_conf_armloss], axis=-1))
+        conf_armloss = tf.reduce_mean(chosen_neg_conf_armloss) + pos_conf_armloss
 
         arm_filter_mask = tf.nn.softmax(neg_armconf)[:, 1] < 0.99
         neg_odmconf = tf.boolean_mask(neg_odmconf, arm_filter_mask)
@@ -510,11 +523,11 @@ class RefineDet320:
 
         neg_odmlabel = tf.constant([self.num_classes-1])
         neg_odmlabel = tf.tile(neg_odmlabel, [num_odmneg])
-        chosen_num_odmneg = tf.cond(num_odmneg > 3*num_pos, lambda: 3*num_pos, lambda: num_odmneg)
         neg_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_odmlabel, logits=neg_odmconf, reduction=tf.losses.Reduction.NONE)
-        pos_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_odmlabel, logits=pos_odmconf, reduction=tf.losses.Reduction.NONE)
+        pos_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_odmlabel, logits=pos_odmconf, reduction=tf.losses.Reduction.MEAN)
+        chosen_num_odmneg = tf.cond(num_odmneg > 3*num_pos, lambda: 3*num_pos, lambda: num_odmneg)
         chosen_neg_conf_odmloss, _ = tf.nn.top_k(neg_conf_odmloss, chosen_num_odmneg)
-        conf_odmloss = tf.reduce_mean(tf.concat([pos_conf_odmloss, chosen_neg_conf_odmloss], axis=-1))
+        conf_odmloss = tf.reduce_mean(chosen_neg_conf_odmloss) + pos_conf_odmloss
 
         pos_truth_armbbox_yx = (pos_gbbox_yx - pos_arm_abbox_yx) / pos_arm_abbox_hw
         pos_truth_armbbox_hw = tf.log(pos_gbbox_hw / pos_arm_abbox_hw)
@@ -554,6 +567,7 @@ class RefineDet320:
 
     def train_one_epoch(self, lr):
         self.is_training = True
+        self.sess.run(self.train_initializer)
         mean_loss = []
         num_iters = self.num_train // self.batch_size
         for i in range(num_iters):
