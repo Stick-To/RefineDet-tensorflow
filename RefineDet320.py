@@ -567,11 +567,7 @@ class RefineDet320:
 
     def train_one_epoch(self, lr):
         self.is_training = True
-<<<<<<< HEAD
         self.sess.run(self.train_initializer)
-=======
-	self.sess.run(self.train_initializer)
->>>>>>> a4c8328b8533a05eeb81e93ee0c88b4f86c63a8f
         mean_loss = []
         num_iters = self.num_train // self.batch_size
         for i in range(num_iters):
