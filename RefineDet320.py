@@ -111,7 +111,7 @@ class RefineDet320:
                 odm2_loc = tf.transpose(odm2_loc, [0, 2, 3, 1])
                 odm3_loc = tf.transpose(odm3_loc, [0, 2, 3, 1])
                 odm4_loc = tf.transpose(odm4_loc, [0, 2, 3, 1])
-                odm1_conf = tf.transpose(odm3_conf, [0, 2, 3, 1])
+                odm1_conf = tf.transpose(odm1_conf, [0, 2, 3, 1])
                 odm2_conf = tf.transpose(odm2_conf, [0, 2, 3, 1])
                 odm3_conf = tf.transpose(odm3_conf, [0, 2, 3, 1])
                 odm4_conf = tf.transpose(odm4_conf, [0, 2, 3, 1])
