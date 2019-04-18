@@ -175,7 +175,7 @@ class RefineDet320:
                 )
                 self.train_op = optimizer.minimize(self.loss, global_step=self.global_step)
             else:
-                armconft = tf.nn.softmax(odmconf[0, ...])
+                armconft = tf.nn.softmax(armconf[0, ...])
                 odmconft = tf.nn.softmax(odmconf[0, ...])
                 arm_maskt = armconft[:, 1] < 0.99
                 armbbox_yxt = tf.boolean_mask(armbbox_yx[0, ...], arm_maskt)
@@ -184,6 +184,7 @@ class RefineDet320:
                 odmbbox_hwt = tf.boolean_mask(odmbbox_hw[0, ...], arm_maskt)
                 abbox_yxt = tf.boolean_mask(abbox_yx, arm_maskt)
                 abbox_hwt = tf.boolean_mask(abbox_hw, arm_maskt)
+                odmconft = tf.boolean_mask(odmconft, arm_maskt)
 
                 odm_class_id = tf.argmax(odmconft, axis=-1)
                 odm_maskt = tf.less(odm_class_id, self.num_classes - 1)
@@ -194,6 +195,9 @@ class RefineDet320:
                 confidence = tf.boolean_mask(odmconft, odm_maskt)[:, :self.num_classes - 1]
                 abbox_yxt = tf.boolean_mask(abbox_yxt, odm_maskt)
                 abbox_hwt = tf.boolean_mask(abbox_hwt, odm_maskt)
+
+
+
 
                 darm_pbbox_yxt = armbbox_yxt * abbox_hwt + abbox_yxt
                 darm_pbbox_hwt = abbox_hwt * tf.exp(armbbox_hwt)
@@ -514,20 +518,21 @@ class RefineDet320:
         pos_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_armlabel, logits=pos_armconf, reduction=tf.losses.Reduction.MEAN)
         neg_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_armlabel, logits=neg_armconf, reduction=tf.losses.Reduction.NONE)
         chosen_num_armneg = tf.cond(num_armneg > 3*num_pos, lambda: 3*num_pos, lambda: num_armneg)
-        chosen_neg_conf_armloss, _ = tf.nn.top_k(neg_conf_armloss, chosen_num_armneg)
+        chosen_neg_conf_armloss, chosen_neg_index = tf.nn.top_k(neg_conf_armloss, chosen_num_armneg)
         conf_armloss = tf.reduce_mean(chosen_neg_conf_armloss) + pos_conf_armloss
 
-        arm_filter_mask = tf.nn.softmax(neg_armconf)[:, 1] < 0.99
-        neg_odmconf = tf.boolean_mask(neg_odmconf, arm_filter_mask)
-        num_odmneg = tf.shape(neg_odmconf)[0]
+        chosen_neg_armconf = tf.gather(neg_armconf, chosen_neg_index)
+        chosen_neg_odmconf = tf.gather(neg_odmconf , chosen_neg_index)
+        arm_filter_mask = tf.nn.softmax(chosen_neg_armconf)[:, 1] < 0.99
+
+        chosen_neg_odmconf = tf.boolean_mask(chosen_neg_odmconf, arm_filter_mask)
+        num_odmneg = tf.shape(chosen_neg_odmconf)[0]
 
         neg_odmlabel = tf.constant([self.num_classes-1])
         neg_odmlabel = tf.tile(neg_odmlabel, [num_odmneg])
-        neg_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_odmlabel, logits=neg_odmconf, reduction=tf.losses.Reduction.NONE)
+        neg_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_odmlabel, logits=chosen_neg_odmconf, reduction=tf.losses.Reduction.MEAN)
         pos_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_odmlabel, logits=pos_odmconf, reduction=tf.losses.Reduction.MEAN)
-        chosen_num_odmneg = tf.cond(num_odmneg > 3*num_pos, lambda: 3*num_pos, lambda: num_odmneg)
-        chosen_neg_conf_odmloss, _ = tf.nn.top_k(neg_conf_odmloss, chosen_num_odmneg)
-        conf_odmloss = tf.reduce_mean(chosen_neg_conf_odmloss) + pos_conf_odmloss
+        conf_odmloss = neg_conf_odmloss + pos_conf_odmloss
 
         pos_truth_armbbox_yx = (pos_gbbox_yx - pos_arm_abbox_yx) / pos_arm_abbox_hw
         pos_truth_armbbox_hw = tf.log(pos_gbbox_hw / pos_arm_abbox_hw)
