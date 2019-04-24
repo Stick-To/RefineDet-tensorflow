@@ -25,11 +25,11 @@ class RefineDet320:
         self.data_format = config['data_format']
         self.mode = config['mode']
         self.batch_size = config['batch_size'] if config['mode'] == 'train' else 1
+        self.anchor_ratios = [0.5, 1.0, 2.0]
+        self.num_anchors = len(self.anchor_ratios)
         self.nms_score_threshold = config['nms_score_threshold']
         self.nms_max_boxes = config['nms_max_boxes']
         self.nms_iou_threshold = config['nms_iou_threshold']
-        self.anchor_ratios = [0.5, 1.0, 2.0]
-        self.num_anchors = len(self.anchor_ratios)
         self.reader = wrap.NewCheckpointReader(config['pretraining_weight'])
 
         if self.mode == 'train':
@@ -71,76 +71,71 @@ class RefineDet320:
 
     def _build_graph(self):
         with tf.variable_scope('feature_extractor'):
-            feat1, feat2, feat3, feat4, downsampling_rate1, downsampling_rate2, downsampling_rate3, downsampling_rate4 = self._feature_extractor(self.images)
-            anchor_scale1 = downsampling_rate1 * 4
-            anchor_scale2 = downsampling_rate2 * 4
-            anchor_scale3 = downsampling_rate3 * 4
-            anchor_scale4 = downsampling_rate4 * 4
+            feat1, feat2, feat3, feat4, stride1, stride2, stride3, stride4 = self._feature_extractor(self.images)
             feat1 = tf.nn.l2_normalize(feat1, axis=3 if self.data_format == 'channels_last' else 1)
+            feat1_norm_factor = tf.get_variable('feat1_l2_norm', initializer=tf.constant(10.))
+            feat1 = feat1_norm_factor * feat1
             feat2 = tf.nn.l2_normalize(feat2, axis=3 if self.data_format == 'channels_last' else 1)
-            feat1_l2_norm = tf.get_variable('feat1_l2_norm', initializer=tf.constant(10.), trainable=True)
-            feat1 = feat1_l2_norm * feat1
-            feat2_l2_norm = tf.get_variable('feat2_l2_norm', initializer=tf.constant(8.), trainable=True)
-            feat2 = feat2_l2_norm * feat2
+            feat2_norm_factor = tf.get_variable('feat2_l2_norm', initializer=tf.constant(8.))
+            feat2 = feat2_norm_factor * feat2
         with tf.variable_scope('ARM'):
-            arm1_loc, arm1_conf = self._arm(feat1, 'arm1')
-            arm2_loc, arm2_conf = self._arm(feat2, 'arm2')
-            arm3_loc, arm3_conf = self._arm(feat3, 'arm3')
-            arm4_loc, arm4_conf = self._arm(feat4, 'arm4')
+            arm1loc, arm1conf = self._arm(feat1, 'arm1')
+            arm2loc, arm2conf = self._arm(feat2, 'arm2')
+            arm3loc, arm3conf = self._arm(feat3, 'arm3')
+            arm4loc, arm4conf = self._arm(feat4, 'arm4')
         with tf.variable_scope('TCB'):
             tcb4 = self._tcb(feat4, 'tcb4')
             tcb3 = self._tcb(feat3, 'tcb3', tcb4)
             tcb2 = self._tcb(feat2, 'tcb2', tcb3)
             tcb1 = self._tcb(feat1, 'tcb1', tcb2)
         with tf.variable_scope('ODM'):
-            odm1_loc, odm1_conf = self._odm(tcb1, 'odm1')
-            odm2_loc, odm2_conf = self._odm(tcb2, 'odm2')
-            odm3_loc, odm3_conf = self._odm(tcb3, 'odm3')
-            odm4_loc, odm4_conf = self._odm(tcb4, 'odm4')
-        with tf.variable_scope('predictor'):
+            odm1loc, odm1conf = self._odm(tcb1, 'odm1')
+            odm2loc, odm2conf = self._odm(tcb2, 'odm2')
+            odm3loc, odm3conf = self._odm(tcb3, 'odm3')
+            odm4loc, odm4conf = self._odm(tcb4, 'odm4')
+        with tf.variable_scope('inference'):
             if self.data_format == 'channels_first':
-                arm1_loc = tf.transpose(arm1_loc, [0, 2, 3, 1])
-                arm2_loc = tf.transpose(arm2_loc, [0, 2, 3, 1])
-                arm3_loc = tf.transpose(arm3_loc, [0, 2, 3, 1])
-                arm4_loc = tf.transpose(arm4_loc, [0, 2, 3, 1])
-                arm1_conf = tf.transpose(arm1_conf, [0, 2, 3, 1])
-                arm2_conf = tf.transpose(arm2_conf, [0, 2, 3, 1])
-                arm3_conf = tf.transpose(arm3_conf, [0, 2, 3, 1])
-                arm4_conf = tf.transpose(arm4_conf, [0, 2, 3, 1])
-                odm1_loc = tf.transpose(odm1_loc, [0, 2, 3, 1])
-                odm2_loc = tf.transpose(odm2_loc, [0, 2, 3, 1])
-                odm3_loc = tf.transpose(odm3_loc, [0, 2, 3, 1])
-                odm4_loc = tf.transpose(odm4_loc, [0, 2, 3, 1])
-                odm1_conf = tf.transpose(odm1_conf, [0, 2, 3, 1])
-                odm2_conf = tf.transpose(odm2_conf, [0, 2, 3, 1])
-                odm3_conf = tf.transpose(odm3_conf, [0, 2, 3, 1])
-                odm4_conf = tf.transpose(odm4_conf, [0, 2, 3, 1])
-            p1shape = tf.shape(arm1_loc)
-            p2shape = tf.shape(arm2_loc)
-            p3shape = tf.shape(arm3_loc)
-            p4shape = tf.shape(arm4_loc)
+                arm1loc = tf.transpose(arm1loc, [0, 2, 3, 1])
+                arm1conf = tf.transpose(arm1conf, [0, 2, 3, 1])
+                arm2loc = tf.transpose(arm2loc, [0, 2, 3, 1])
+                arm2conf = tf.transpose(arm2conf, [0, 2, 3, 1])
+                arm3loc = tf.transpose(arm3loc, [0, 2, 3, 1])
+                arm3conf = tf.transpose(arm3conf, [0, 2, 3, 1])
+                arm4loc = tf.transpose(arm4loc, [0, 2, 3, 1])
+                arm4conf = tf.transpose(arm4conf, [0, 2, 3, 1])
+                odm1loc = tf.transpose(odm1loc, [0, 2, 3, 1])
+                odm1conf = tf.transpose(odm1conf, [0, 2, 3, 1])
+                odm2loc = tf.transpose(odm2loc, [0, 2, 3, 1])
+                odm2conf = tf.transpose(odm2conf, [0, 2, 3, 1])
+                odm3loc = tf.transpose(odm3loc, [0, 2, 3, 1])
+                odm3conf = tf.transpose(odm3conf, [0, 2, 3, 1])
+                odm4loc = tf.transpose(odm4loc, [0, 2, 3, 1])
+                odm4conf = tf.transpose(odm4conf, [0, 2, 3, 1])
+            p1shape = tf.shape(arm1loc)
+            p2shape = tf.shape(arm2loc)
+            p3shape = tf.shape(arm3loc)
+            p4shape = tf.shape(arm4loc)
+            arm1pbbox_yx, arm1pbbox_hw, arm1pconf = self._get_armpbbox(arm1loc, arm1conf)
+            arm2pbbox_yx, arm2pbbox_hw, arm2pconf = self._get_armpbbox(arm2loc, arm2conf)
+            arm3pbbox_yx, arm3pbbox_hw, arm3pconf = self._get_armpbbox(arm3loc, arm3conf)
+            arm4pbbox_yx, arm4pbbox_hw, arm4pconf = self._get_armpbbox(arm4loc, arm4conf)
 
-            arm1bbox_yx, arm1bbox_hw, arm1conf = self._get_armpred(arm1_loc, arm1_conf)
-            arm2bbox_yx, arm2bbox_hw, arm2conf = self._get_armpred(arm2_loc, arm2_conf)
-            arm3bbox_yx, arm3bbox_hw, arm3conf = self._get_armpred(arm3_loc, arm3_conf)
-            arm4bbox_yx, arm4bbox_hw, arm4conf = self._get_armpred(arm4_loc, arm4_conf)
-            odm1bbox_yx, odm1bbox_hw, odm1conf = self._get_odmpred(odm1_loc, odm1_conf)
-            odm2bbox_yx, odm2bbox_hw, odm2conf = self._get_odmpred(odm2_loc, odm2_conf)
-            odm3bbox_yx, odm3bbox_hw, odm3conf = self._get_odmpred(odm3_loc, odm3_conf)
-            odm4bbox_yx, odm4bbox_hw, odm4conf = self._get_odmpred(odm4_loc, odm4_conf)
+            odm1pbbox_yx, odm1pbbox_hw, odm1pconf = self._get_odmpbbox(odm1loc, odm1conf)
+            odm2pbbox_yx, odm2pbbox_hw, odm2pconf = self._get_odmpbbox(odm2loc, odm2conf)
+            odm3pbbox_yx, odm3pbbox_hw, odm3pconf = self._get_odmpbbox(odm3loc, odm3conf)
+            odm4pbbox_yx, odm4pbbox_hw, odm4pconf = self._get_odmpbbox(odm4loc, odm4conf)
 
-            armbbox_yx = tf.concat([arm1bbox_yx, arm2bbox_yx, arm3bbox_yx, arm4bbox_yx], axis=1)
-            armbbox_hw = tf.concat([arm1bbox_hw, arm2bbox_hw, arm3bbox_hw, arm4bbox_hw], axis=1)
-            armconf = tf.concat([arm1conf, arm2conf, arm3conf, arm4conf], axis=1)
-            odmbbox_yx = tf.concat([odm1bbox_yx, odm2bbox_yx, odm3bbox_yx, odm4bbox_yx], axis=1)
-            odmbbox_hw = tf.concat([odm1bbox_hw, odm2bbox_hw, odm3bbox_hw, odm4bbox_hw], axis=1)
-            odmconf = tf.concat([odm1conf, odm2conf, odm3conf, odm4conf], axis=1)
+            a1bbox_y1x1, a1bbox_y2x2, a1bbox_yx, a1bbox_hw = self._get_abbox(stride1*4, stride1, p1shape)
+            a2bbox_y1x1, a2bbox_y2x2, a2bbox_yx, a2bbox_hw = self._get_abbox(stride2*4, stride2, p2shape)
+            a3bbox_y1x1, a3bbox_y2x2, a3bbox_yx, a3bbox_hw = self._get_abbox(stride3*4, stride3, p3shape)
+            a4bbox_y1x1, a4bbox_y2x2, a4bbox_yx, a4bbox_hw = self._get_abbox(stride4*4, stride4, p4shape)
 
-            a1bbox_y1x1, a1bbox_y2x2, a1bbox_yx, a1bbox_hw = self._get_abbox(anchor_scale1, p1shape, downsampling_rate1)
-            a2bbox_y1x1, a2bbox_y2x2, a2bbox_yx, a2bbox_hw = self._get_abbox(anchor_scale2, p2shape, downsampling_rate2)
-            a3bbox_y1x1, a3bbox_y2x2, a3bbox_yx, a3bbox_hw = self._get_abbox(anchor_scale3, p3shape, downsampling_rate3)
-            a4bbox_y1x1, a4bbox_y2x2, a4bbox_yx, a4bbox_hw = self._get_abbox(anchor_scale4, p4shape, downsampling_rate4)
-
+            armpbbox_yx = tf.concat([arm1pbbox_yx, arm2pbbox_yx, arm3pbbox_yx, arm4pbbox_yx], axis=1)
+            armpbbox_hw = tf.concat([arm1pbbox_hw, arm2pbbox_hw, arm3pbbox_hw, arm4pbbox_hw], axis=1)
+            armpconf = tf.concat([arm1pconf, arm2pconf, arm3pconf, arm4pconf], axis=1)
+            odmpbbox_yx = tf.concat([odm1pbbox_yx, odm2pbbox_yx, odm3pbbox_yx, odm4pbbox_yx], axis=1)
+            odmpbbox_hw = tf.concat([odm1pbbox_hw, odm2pbbox_hw, odm3pbbox_hw, odm4pbbox_hw], axis=1)
+            odmpconf = tf.concat([odm1pconf, odm2pconf, odm3pconf, odm4pconf], axis=1)
             abbox_y1x1 = tf.concat([a1bbox_y1x1, a2bbox_y1x1, a3bbox_y1x1, a4bbox_y1x1], axis=0)
             abbox_y2x2 = tf.concat([a1bbox_y2x2, a2bbox_y2x2, a3bbox_y2x2, a4bbox_y2x2], axis=0)
             abbox_yx = tf.concat([a1bbox_yx, a2bbox_yx, a3bbox_yx, a4bbox_yx], axis=0)
@@ -151,12 +146,12 @@ class RefineDet320:
                 cond = lambda loss, i: tf.less(i, tf.cast(self.batch_size, tf.float32))
                 body = lambda loss, i: (
                     tf.add(loss, self._compute_one_image_loss(
-                        tf.squeeze(tf.gather(armbbox_yx, tf.cast(i, tf.int32))),
-                        tf.squeeze(tf.gather(armbbox_hw, tf.cast(i, tf.int32))),
-                        tf.squeeze(tf.gather(armconf, tf.cast(i, tf.int32))),
-                        tf.squeeze(tf.gather(odmbbox_yx, tf.cast(i, tf.int32))),
-                        tf.squeeze(tf.gather(odmbbox_hw, tf.cast(i, tf.int32))),
-                        tf.squeeze(tf.gather(odmconf, tf.cast(i, tf.int32))),
+                        tf.squeeze(tf.gather(armpbbox_yx, tf.cast(i, tf.int32))),
+                        tf.squeeze(tf.gather(armpbbox_hw, tf.cast(i, tf.int32))),
+                        tf.squeeze(tf.gather(armpconf, tf.cast(i, tf.int32))),
+                        tf.squeeze(tf.gather(odmpbbox_yx, tf.cast(i, tf.int32))),
+                        tf.squeeze(tf.gather(odmpbbox_hw, tf.cast(i, tf.int32))),
+                        tf.squeeze(tf.gather(odmpconf, tf.cast(i, tf.int32))),
                         abbox_y1x1,
                         abbox_y2x2,
                         abbox_yx,
@@ -175,45 +170,32 @@ class RefineDet320:
                 )
                 self.train_op = optimizer.minimize(self.loss, global_step=self.global_step)
             else:
-                armconft = tf.nn.softmax(armconf[0, ...])
-                odmconft = tf.nn.softmax(odmconf[0, ...])
-                arm_maskt = armconft[:, 1] < 0.99
-                armbbox_yxt = tf.boolean_mask(armbbox_yx[0, ...], arm_maskt)
-                armbbox_hwt = tf.boolean_mask(armbbox_hw[0, ...], arm_maskt)
-                odmbbox_yxt = tf.boolean_mask(odmbbox_yx[0, ...], arm_maskt)
-                odmbbox_hwt = tf.boolean_mask(odmbbox_hw[0, ...], arm_maskt)
-                abbox_yxt = tf.boolean_mask(abbox_yx, arm_maskt)
-                abbox_hwt = tf.boolean_mask(abbox_hw, arm_maskt)
-                odmconft = tf.boolean_mask(odmconft, arm_maskt)
+                armconft = tf.nn.softmax(armpconf[0, ...])
+                armmask = armconft[:, 1] < 0.99
+                armpbbox_yxt = tf.boolean_mask(armpbbox_yx[0, ...], armmask)
+                armpbbox_hwt = tf.boolean_mask(armpbbox_hw[0, ...], armmask)
+                odmpbbox_yxt = tf.boolean_mask(odmpbbox_yx[0, ...], armmask)
+                odmpbbox_hwt = tf.boolean_mask(odmpbbox_hw[0, ...], armmask)
+                abbox_yxt = tf.boolean_mask(abbox_yx, armmask)
+                abbox_hwt = tf.boolean_mask(abbox_hw, armmask)
+                odmconft = tf.boolean_mask(tf.nn.softmax(odmpconf[0, ...]), armmask)
+                confidence = odmconft[..., :self.num_classes-1]
 
-                odm_class_id = tf.argmax(odmconft, axis=-1)
-                odm_maskt = tf.less(odm_class_id, self.num_classes - 1)
-                armbbox_yxt = tf.boolean_mask(armbbox_yxt, odm_maskt)
-                armbbox_hwt = tf.boolean_mask(armbbox_hwt, odm_maskt)
-                odmbbox_yxt = tf.boolean_mask(odmbbox_yxt, odm_maskt)
-                odmbbox_hwt = tf.boolean_mask(odmbbox_hwt, odm_maskt)
-                confidence = tf.boolean_mask(odmconft, odm_maskt)[:, :self.num_classes - 1]
-                abbox_yxt = tf.boolean_mask(abbox_yxt, odm_maskt)
-                abbox_hwt = tf.boolean_mask(abbox_hwt, odm_maskt)
+                arm_yx = armpbbox_yxt * abbox_hwt + abbox_yxt
+                arm_hw = tf.exp(armpbbox_hwt) * abbox_hwt
+                odm_yx = odmpbbox_yxt * arm_hw + arm_yx
+                odm_hw = tf.exp(odmpbbox_hwt) * arm_hw
 
-
-
-
-                darm_pbbox_yxt = armbbox_yxt * abbox_hwt + abbox_yxt
-                darm_pbbox_hwt = abbox_hwt * tf.exp(armbbox_hwt)
-                dodm_pbbox_yxt = odmbbox_yxt * darm_pbbox_hwt + darm_pbbox_yxt
-                dodm_pbbox_hwt = darm_pbbox_hwt * tf.exp(odmbbox_hwt)
-
-                dpbbox_y1x1 = dodm_pbbox_yxt - dodm_pbbox_hwt / 2.
-                dpbbox_y2x2 = dodm_pbbox_yxt + dodm_pbbox_hwt / 2.
-                dpbbox_y1x1y2x2 = tf.concat([dpbbox_y1x1, dpbbox_y2x2], axis=-1)
+                odm_y1x1 = odm_yx - odm_hw / 2.
+                odm_y2x2 = odm_yx + odm_hw / 2.
+                odm_y1x1y2x2 = tf.concat([odm_y1x1, odm_y2x2], axis=-1)
                 filter_mask = tf.greater_equal(confidence, self.nms_score_threshold)
                 scores = []
                 class_id = []
                 bbox = []
-                for i in range(self.num_classes - 1):
+                for i in range(self.num_classes-1):
                     scoresi = tf.boolean_mask(confidence[:, i], filter_mask[:, i])
-                    bboxi = tf.boolean_mask(dpbbox_y1x1y2x2, filter_mask[:, i])
+                    bboxi = tf.boolean_mask(odm_y1x1y2x2, filter_mask[:, i])
                     selected_indices = tf.image.non_max_suppression(
 
                         bboxi, scoresi, self.nms_max_boxes, self.nms_iou_threshold,
@@ -224,6 +206,7 @@ class RefineDet320:
                 bbox = tf.concat(bbox, axis=0)
                 scores = tf.concat(scores, axis=0)
                 class_id = tf.concat(class_id, axis=0)
+
                 self.detection_pred = [scores, bbox, class_id]
 
     def _feature_extractor(self, images):
@@ -337,85 +320,91 @@ class RefineDet320:
                                                         initializer=self.reader.get_tensor("vgg_16/conv5/conv5_3/biases"),
                                                         trainable=True),
                                         name="conv5_3")
-        pool5 = self._max_pooling(conv5_3, 3, 2, 'pool5')
-        conv_fc6 = self._conv_layer(pool5, 512, 3, 1, 'conv_fc6', dilation_rate=2, activation=tf.nn.relu)
-        conv_fc7 = self._conv_layer(conv_fc6, 512, 3, 1, 'conv_fc7', dilation_rate=2, activation=tf.nn.relu)
-        conv6_1 = self._conv_layer(conv_fc7, 1024, 3, 2, 'conv6_1', activation=tf.nn.relu)
-        conv6_2 = self._conv_layer(conv6_1, 1024, 3, 1, 'conv6_2', activation=tf.nn.relu)
-
-        downsampling_rate1 = 8.0
-        downsampling_rate2 = 16.0
-        downsampling_rate3 = 32.0
-        downsampling_rate4 = 64.0
-        return conv4_3, conv5_3, conv_fc7, conv6_2, downsampling_rate1, downsampling_rate2, downsampling_rate3, downsampling_rate4
+        pool5 = self._max_pooling(conv5_3, 3, 1, 'pool5')
+        conv6 = self._conv_layer(pool5, 1024, 3, 1, 'conv6', dilation_rate=2, activation=tf.nn.relu)
+        conv7 = self._conv_layer(conv6, 1024, 1, 1, 'conv7', activation=tf.nn.relu)
+        conv8_1 = self._conv_layer(conv7, 256, 1, 1, 'conv8_1', activation=tf.nn.relu)
+        conv8_2 = self._conv_layer(conv8_1, 512, 3, 2, 'conv8_2', activation=tf.nn.relu)
+        conv9_1 = self._conv_layer(conv8_2, 256, 1, 1, 'conv9_1', activation=tf.nn.relu)
+        conv9_2 = self._conv_layer(conv9_1, 512, 3, 2, 'conv9_2', activation=tf.nn.relu)
+        conv10_1 = self._conv_layer(conv9_2, 256, 1, 1, 'conv10_1', activation=tf.nn.relu)
+        conv10_2 = self._conv_layer(conv10_1, 256, 3, 1, 'conv10_2', activation=tf.nn.relu)
+        stride1 = 8
+        stride2 = 16
+        stride3 = 32
+        stride4 = 64
+        return conv4_3, conv5_3, conv8_2, conv10_2, stride1, stride2, stride3, stride4
 
     def _arm(self, bottom, scope):
         with tf.variable_scope(scope):
-            conv1 = self._conv_layer(bottom, 512, 3, 1, activation=tf.nn.relu)
-            conv2 = self._conv_layer(conv1, 512, 3, 1, activation=tf.nn.relu)
-            pred_loc = self._conv_layer(conv2, 4*self.num_anchors, 3, 1)
-            pred_conf = self._conv_layer(conv2, 2*self.num_anchors, 3, 1)
-            return pred_loc, pred_conf
+            conv1 = self._conv_layer(bottom, 256, 3, 1, activation=tf.nn.relu)
+            conv2 = self._conv_layer(conv1, 256, 3, 1, activation=tf.nn.relu)
+            conv3 = self._conv_layer(conv2, 256, 3, 1, activation=tf.nn.relu)
+            conv4 = self._conv_layer(conv3, 256, 3, 1, activation=tf.nn.relu)
+            ploc = self._conv_layer(conv4, 4*self.num_anchors, 3, 1)
+            pconf = self._conv_layer(conv4, 2*self.num_anchors, 3, 1)
+            return ploc, pconf
 
-    def _tcb(self, feat, scope, high_level_feat=None):
+    def _tcb(self, bottom, scope, high_level_feat=None):
         with tf.variable_scope(scope):
-            conv1 = self._conv_layer(feat, 256, 3, 1, 'conv1', activation=tf.nn.relu)
-            conv2 = self._conv_layer(conv1, 256, 3, 1, 'conv2')
+            conv1 = self._conv_layer(bottom, 256, 3, 1, activation=tf.nn.relu)
+            conv2 = self._conv_layer(conv1, 256, 3, 1)
             if high_level_feat is not None:
-                dconv = self._dconv_layer(high_level_feat, 256, 4, 2, 'dconv')
-                conv_sum = tf.nn.relu(conv2 + dconv)
-            else:
-                conv_sum = tf.nn.relu(conv2)
-            conv3 = self._conv_layer(conv_sum, 256, 3, 1, 'conv3', activation=tf.nn.relu)
+                dconv = self._dconv_layer(high_level_feat, 256, 4, 2)
+                conv2 = tf.nn.relu(conv2 + dconv)
+            conv3 = tf.nn.relu(conv2)
             return conv3
 
     def _odm(self, bottom, scope):
         with tf.variable_scope(scope):
             conv1 = self._conv_layer(bottom, 256, 3, 1, activation=tf.nn.relu)
             conv2 = self._conv_layer(conv1, 256, 3, 1, activation=tf.nn.relu)
-            pred_loc = self._conv_layer(conv2, 4*self.num_anchors, 3, 1)
-            pred_conf = self._conv_layer(conv2, self.num_classes*self.num_anchors, 3, 1)
-            return pred_loc, pred_conf
+            conv3 = self._conv_layer(conv2, 256, 3, 1, activation=tf.nn.relu)
+            conv4 = self._conv_layer(conv3, 256, 3, 1, activation=tf.nn.relu)
+            ploc = self._conv_layer(conv4, 4*self.num_anchors, 3, 1)
+            pconf = self._conv_layer(conv4, self.num_classes*self.num_anchors, 3, 1)
+            return ploc, pconf
 
-    def _get_armpred(self, pred_loc, pred_conf):
-        pconf = tf.reshape(pred_conf, [self.batch_size, -1, 2])
-        ploc = tf.reshape(pred_loc, [self.batch_size, -1, 4])
+    def _get_armpbbox(self, ploc, pconf):
+        pconf = tf.reshape(pconf, [self.batch_size, -1, 2])
+        ploc = tf.reshape(ploc, [self.batch_size, -1, 4])
         pbbox_yx = ploc[..., :2]
         pbbox_hw = ploc[..., 2:]
         return pbbox_yx, pbbox_hw, pconf
 
-    def _get_odmpred(self, pred_loc, pred_conf):
-        pconf = tf.reshape(pred_conf, [self.batch_size, -1, self.num_classes])
-        ploc = tf.reshape(pred_loc, [self.batch_size, -1, 4])
+    def _get_odmpbbox(self, ploc, pconf):
+        pconf = tf.reshape(pconf, [self.batch_size, -1, self.num_classes])
+        ploc = tf.reshape(ploc, [self.batch_size, -1, 4])
         pbbox_yx = ploc[..., :2]
         pbbox_hw = ploc[..., 2:]
         return pbbox_yx, pbbox_hw, pconf
 
-    def _get_abbox(self, size, pshape, downsampling_rate):
+    def _get_abbox(self, size, stride, pshape):
         topleft_y = tf.range(0., tf.cast(pshape[1], tf.float32), dtype=tf.float32)
         topleft_x = tf.range(0., tf.cast(pshape[2], tf.float32), dtype=tf.float32)
         topleft_y = tf.reshape(topleft_y, [-1, 1, 1, 1]) + 0.5
         topleft_x = tf.reshape(topleft_x, [1, -1, 1, 1]) + 0.5
-        topleft_y = tf.tile(topleft_y, [1, pshape[2], 1, 1]) * downsampling_rate
-        topleft_x = tf.tile(topleft_x, [pshape[1], 1, 1, 1]) * downsampling_rate
+        topleft_y = tf.tile(topleft_y, [1, pshape[2], 1, 1]) * stride
+        topleft_x = tf.tile(topleft_x, [pshape[1], 1, 1, 1]) * stride
         topleft_yx = tf.concat([topleft_y, topleft_x], -1)
         topleft_yx = tf.tile(topleft_yx, [1, 1, self.num_anchors, 1])
 
-        anchors = []
+        priors = []
         for ratio in self.anchor_ratios:
-            anchors.append([size*(ratio**0.5), size/(ratio**0.5)])
-        anchors = tf.convert_to_tensor(anchors, tf.float32)
-        anchors = tf.reshape(anchors, [1, 1, -1, 2])
+            priors.append([size*(ratio**0.5), size/(ratio**0.5)])
+        priors = tf.convert_to_tensor(priors, tf.float32)
+        priors = tf.reshape(priors, [1, 1, -1, 2])
 
-        abbox_y1x1 = tf.reshape(topleft_yx - anchors / 2., [-1, 2])
-        abbox_y2x2 = tf.reshape(topleft_yx + anchors / 2., [-1, 2])
+        abbox_y1x1 = tf.reshape(topleft_yx - priors / 2., [-1, 2])
+        abbox_y2x2 = tf.reshape(topleft_yx + priors / 2., [-1, 2])
         abbox_yx = abbox_y1x1 / 2. + abbox_y2x2 / 2.
         abbox_hw = abbox_y2x2 - abbox_y1x1
         return abbox_y1x1, abbox_y2x2, abbox_yx, abbox_hw
 
-    def _compute_one_image_loss(self, armbbox_yx, armbbox_hw, armconf,
-                                odmbbox_yx, odmbbox_hw, odmconf,
-                                abbox_y1x1, abbox_y2x2, abbox_yx, abbox_hw, ground_truth):
+    def _compute_one_image_loss(self, armpbbox_yx, armpbbox_hw, armpconf,
+                                odmpbbox_yx, odmpbbox_hw, odmpconf,
+                                abbox_y1x1, abbox_y2x2,
+                                abbox_yx, abbox_hw,  ground_truth):
         slice_index = tf.argmin(ground_truth, axis=0)[0]
         ground_truth = tf.gather(ground_truth, tf.range(0, slice_index, dtype=tf.int64))
         gbbox_yx = ground_truth[..., 0:2]
@@ -431,125 +420,129 @@ class RefineDet320:
         gbbox_hwti = tf.reshape(gbbox_hw, [-1, 1, 2])
         gbbox_y1x1ti = tf.reshape(gbbox_y1x1, [-1, 1, 2])
         gbbox_y2x2ti = tf.reshape(gbbox_y2x2, [-1, 1, 2])
-        num_a = tf.shape(abbox_hwti)[1]
-        num_g = tf.shape(gbbox_hwti)[0]
-        abbox_hwti = tf.tile(abbox_hwti, [num_g, 1, 1])
-        abbox_y1x1ti = tf.tile(abbox_y1x1ti, [num_g, 1, 1])
-        abbox_y2x2ti = tf.tile(abbox_y2x2ti, [num_g, 1, 1])
-        gbbox_hwti = tf.tile(gbbox_hwti, [1, num_a, 1])
-        gbbox_y1x1ti = tf.tile(gbbox_y1x1ti, [1, num_a, 1])
-        gbbox_y2x2ti = tf.tile(gbbox_y2x2ti, [1, num_a, 1])
+        ashape = tf.shape(abbox_hwti)
+        gshape = tf.shape(gbbox_hwti)
+        abbox_hwti = tf.tile(abbox_hwti, [gshape[0], 1, 1])
+        abbox_y1x1ti = tf.tile(abbox_y1x1ti, [gshape[0], 1, 1])
+        abbox_y2x2ti = tf.tile(abbox_y2x2ti, [gshape[0], 1, 1])
+        gbbox_hwti = tf.tile(gbbox_hwti, [1, ashape[1], 1])
+        gbbox_y1x1ti = tf.tile(gbbox_y1x1ti, [1, ashape[1], 1])
+        gbbox_y2x2ti = tf.tile(gbbox_y2x2ti, [1, ashape[1], 1])
 
         gaiou_y1x1ti = tf.maximum(abbox_y1x1ti, gbbox_y1x1ti)
         gaiou_y2x2ti = tf.minimum(abbox_y2x2ti, gbbox_y2x2ti)
         gaiou_area = tf.reduce_prod(tf.maximum(gaiou_y2x2ti - gaiou_y1x1ti, 0), axis=-1)
         aarea = tf.reduce_prod(abbox_hwti, axis=-1)
         garea = tf.reduce_prod(gbbox_hwti, axis=-1)
-        gaiou_rate = gaiou_area / (aarea + garea - gaiou_area + 1e-8)
+        gaiou_rate = gaiou_area / (aarea + garea - gaiou_area)
 
         best_raindex = tf.argmax(gaiou_rate, axis=1)
+        best_armpbbox_yx = tf.gather(armpbbox_yx, best_raindex)
+        best_armpbbox_hw = tf.gather(armpbbox_hw, best_raindex)
+        best_armpconf = tf.gather(armpconf, best_raindex)
+        best_odmpbbox_yx = tf.gather(odmpbbox_yx, best_raindex)
+        best_odmpbbox_hw = tf.gather(odmpbbox_hw, best_raindex)
+        best_odmpconf = tf.gather(odmpconf, best_raindex)
         best_abbox_yx = tf.gather(abbox_yx, best_raindex)
         best_abbox_hw = tf.gather(abbox_hw, best_raindex)
-        best_armbbox_yx = tf.gather(armbbox_yx, best_raindex)
-        best_armbbox_hw = tf.gather(armbbox_hw, best_raindex)
-        best_armconf = tf.gather(armconf, best_raindex)
-        best_odmbbox_yx = tf.gather(odmbbox_yx, best_raindex)
-        best_odmbbox_hw = tf.gather(odmbbox_hw, best_raindex)
-        best_odmconf = tf.gather(odmconf, best_raindex)
 
-        best_mask, _ = tf.unique(best_raindex)
-        best_mask = tf.sort(best_mask)
-        best_mask = tf.reshape(best_mask, [-1, 1])
-        best_mask = tf.sparse.SparseTensor(tf.concat([best_mask, tf.zeros_like(best_mask)], axis=-1),
-                                           tf.squeeze(tf.ones_like(best_mask)), dense_shape=[num_a, 1])
-        best_mask = tf.reshape(tf.cast(tf.sparse.to_dense(best_mask), tf.float32), [-1])
+        bestmask, _ = tf.unique(best_raindex)
+        bestmask = tf.contrib.framework.sort(bestmask)
+        bestmask = tf.reshape(bestmask, [-1, 1])
+        bestmask = tf.sparse.SparseTensor(tf.concat([bestmask, tf.zeros_like(bestmask)], axis=-1),
+                                          tf.squeeze(tf.ones_like(bestmask)), dense_shape=[ashape[1], 1])
+        bestmask = tf.reshape(tf.cast(tf.sparse.to_dense(bestmask), tf.float32), [-1])
 
-        other_mask = 1. - best_mask
-        other_mask = other_mask > 0.
-        other_abbox_yx = tf.boolean_mask(abbox_yx, other_mask)
-        other_abbox_hw = tf.boolean_mask(abbox_hw, other_mask)
-        other_armbbox_yx = tf.boolean_mask(armbbox_yx, other_mask)
-        other_armbbox_hw = tf.boolean_mask(armbbox_hw, other_mask)
-        other_armconf = tf.boolean_mask(armconf, other_mask)
-        other_odmbbox_yx = tf.boolean_mask(odmbbox_yx, other_mask)
-        other_odmbbox_hw = tf.boolean_mask(odmbbox_hw, other_mask)
-        other_odmconf = tf.boolean_mask(odmconf, other_mask)
+        othermask = 1. - bestmask
+        othermask = othermask > 0.
+        other_armpbbox_yx = tf.boolean_mask(armpbbox_yx, othermask)
+        other_armpbbox_hw = tf.boolean_mask(armpbbox_hw, othermask)
+        other_armpconf = tf.boolean_mask(armpconf, othermask)
+        other_odmpbbox_yx = tf.boolean_mask(odmpbbox_yx, othermask)
+        other_odmpbbox_hw = tf.boolean_mask(odmpbbox_hw, othermask)
+        other_odmpconf = tf.boolean_mask(odmpconf, othermask)
+        other_abbox_yx = tf.boolean_mask(abbox_yx, othermask)
+        other_abbox_hw = tf.boolean_mask(abbox_hw, othermask)
 
         agiou_rate = tf.transpose(gaiou_rate)
-        other_agiou_rate = tf.boolean_mask(agiou_rate, other_mask)
+        other_agiou_rate = tf.boolean_mask(agiou_rate, othermask)
         max_agiou_rate = tf.reduce_max(other_agiou_rate, axis=1)
         pos_agiou_mask = max_agiou_rate > 0.5
-        neg_agiou_mask = max_agiou_rate < 0.5
+        neg_agiou_mask = max_agiou_rate < 0.4
         rgindex = tf.argmax(other_agiou_rate, axis=1)
-
         pos_rgindex = tf.boolean_mask(rgindex, pos_agiou_mask)
+        pos_armppox_yx = tf.boolean_mask(other_armpbbox_yx, pos_agiou_mask)
+        pos_armppox_hw = tf.boolean_mask(other_armpbbox_hw, pos_agiou_mask)
+        pos_armpconf = tf.boolean_mask(other_armpconf, pos_agiou_mask)
+        pos_odmppox_yx = tf.boolean_mask(other_odmpbbox_yx, pos_agiou_mask)
+        pos_odmppox_hw = tf.boolean_mask(other_odmpbbox_hw, pos_agiou_mask)
+        pos_odmpconf = tf.boolean_mask(other_odmpconf, pos_agiou_mask)
         pos_abbox_yx = tf.boolean_mask(other_abbox_yx, pos_agiou_mask)
         pos_abbox_hw = tf.boolean_mask(other_abbox_hw, pos_agiou_mask)
+        pos_odmlabel = tf.gather(label, pos_rgindex)
         pos_gbbox_yx = tf.gather(gbbox_yx, pos_rgindex)
         pos_gbbox_hw = tf.gather(gbbox_hw, pos_rgindex)
-        pos_armbbox_yx = tf.boolean_mask(other_armbbox_yx, pos_agiou_mask)
-        pos_armbbox_hw = tf.boolean_mask(other_armbbox_hw, pos_agiou_mask)
-        pos_armconf = tf.boolean_mask(other_armconf, pos_agiou_mask)
-        pos_odmbbox_yx = tf.boolean_mask(other_odmbbox_yx, pos_agiou_mask)
-        pos_odmbbox_hw = tf.boolean_mask(other_odmbbox_hw, pos_agiou_mask)
-        pos_odmconf = tf.boolean_mask(other_odmconf, pos_agiou_mask)
-        pos_odmlabel = tf.gather(label, pos_rgindex)
-        neg_armconf = tf.boolean_mask(other_armconf, neg_agiou_mask)
-        neg_odmconf = tf.boolean_mask(other_odmconf, neg_agiou_mask)
+        neg_armpconf = tf.boolean_mask(other_armpconf, neg_agiou_mask)
+        neg_armabbox_yx = tf.boolean_mask(other_abbox_yx, neg_agiou_mask)
+        neg_armabbox_hw = tf.boolean_mask(other_abbox_hw, neg_agiou_mask)
+        neg_armabbox_y1x1y2x2 = tf.concat([neg_armabbox_yx - neg_armabbox_hw/2., neg_armabbox_yx + neg_armabbox_hw/2.], axis=-1)
+        neg_odmpconf = tf.boolean_mask(other_odmpconf, neg_agiou_mask)
 
-        pos_gbbox_yx = tf.concat([gbbox_yx, pos_gbbox_yx], axis=0)
-        pos_gbbox_hw = tf.concat([gbbox_hw, pos_gbbox_hw], axis=0)
-        pos_arm_abbox_yx = tf.concat([best_abbox_yx, pos_abbox_yx], axis=0)
-        pos_arm_abbox_hw = tf.concat([best_abbox_hw, pos_abbox_hw], axis=0)
-        pos_armbbox_yx = tf.concat([best_armbbox_yx, pos_armbbox_yx], axis=0)
-        pos_armbbox_hw = tf.concat([best_armbbox_hw, pos_armbbox_hw], axis=0)
-        pos_armconf = tf.concat([best_armconf, pos_armconf], axis=0)
-        pos_odmbbox_yx = tf.concat([best_odmbbox_yx, pos_odmbbox_yx], axis=0)
-        pos_odmbbox_hw = tf.concat([best_odmbbox_hw, pos_odmbbox_hw], axis=0)
-        pos_odmlabel = tf.reshape(tf.concat([label, pos_odmlabel], axis=0), [-1])
-        pos_odmconf = tf.concat([best_odmconf, pos_odmconf], axis=0)
+        total_pos_armpbbox_yx = tf.concat([best_armpbbox_yx, pos_armppox_yx], axis=0)
+        total_pos_armpbbox_hw = tf.concat([best_armpbbox_hw, pos_armppox_hw], axis=0)
+        total_pos_armpconf = tf.concat([best_armpconf, pos_armpconf], axis=0)
+        total_pos_odmpbbox_yx = tf.concat([best_odmpbbox_yx, pos_odmppox_yx], axis=0)
+        total_pos_odmpbbox_hw = tf.concat([best_odmpbbox_hw, pos_odmppox_hw], axis=0)
+        total_pos_odmpconf = tf.concat([best_odmpconf, pos_odmpconf], axis=0)
+        total_pos_odmlabel = tf.concat([label, pos_odmlabel], axis=0)
+        total_pos_gbbox_yx = tf.concat([gbbox_yx, pos_gbbox_yx], axis=0)
+        total_pos_gbbox_hw = tf.concat([gbbox_hw, pos_gbbox_hw], axis=0)
+        total_pos_abbox_yx = tf.concat([best_abbox_yx, pos_abbox_yx], axis=0)
+        total_pos_abbox_hw = tf.concat([best_abbox_hw, pos_abbox_hw], axis=0)
 
-        num_pos = tf.shape(pos_armconf)[0]
-        num_armneg = tf.shape(neg_armconf)[0]
-        pos_armlabel = tf.constant([0])
-        pos_armlabel = tf.tile(pos_armlabel, [num_pos])
-        neg_armlabel = tf.constant([1])
-        neg_armlabel = tf.tile(neg_armlabel, [num_armneg])
-        pos_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_armlabel, logits=pos_armconf, reduction=tf.losses.Reduction.MEAN)
-        neg_conf_armloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_armlabel, logits=neg_armconf, reduction=tf.losses.Reduction.NONE)
+        num_pos = tf.shape(total_pos_odmlabel)[0]
+        num_armneg = tf.shape(neg_armpconf)[0]
         chosen_num_armneg = tf.cond(num_armneg > 3*num_pos, lambda: 3*num_pos, lambda: num_armneg)
-        chosen_neg_conf_armloss, chosen_neg_index = tf.nn.top_k(neg_conf_armloss, chosen_num_armneg)
-        conf_armloss = tf.reduce_mean(chosen_neg_conf_armloss) + pos_conf_armloss
+        neg_armclass_id = tf.constant([1])
+        pos_armclass_id = tf.constant([0])
+        neg_armlabel = tf.tile(neg_armclass_id, [num_armneg])
+        pos_armlabel = tf.tile(pos_armclass_id, [num_pos])
+        total_neg_armloss = tf.losses.sparse_softmax_cross_entropy(neg_armlabel, neg_armpconf, reduction=tf.losses.Reduction.NONE)
+        selected_armindices = tf.image.non_max_suppression(
+            neg_armabbox_y1x1y2x2, total_neg_armloss, chosen_num_armneg, iou_threshold=0.7
+        )
+        neg_armloss = tf.reduce_mean(tf.gather(total_neg_armloss, selected_armindices))
 
-        chosen_neg_armconf = tf.gather(neg_armconf, chosen_neg_index)
-        chosen_neg_odmconf = tf.gather(neg_odmconf , chosen_neg_index)
-        arm_filter_mask = tf.nn.softmax(chosen_neg_armconf)[:, 1] < 0.99
+        chosen_neg_armpconf = tf.gather(neg_armpconf, selected_armindices)
+        chosen_neg_odmpconf = tf.gather(neg_odmpconf, selected_armindices)
 
-        chosen_neg_odmconf = tf.boolean_mask(chosen_neg_odmconf, arm_filter_mask)
-        num_odmneg = tf.shape(chosen_neg_odmconf)[0]
+        neg_odm_mask = chosen_neg_armpconf[:, 1] < 0.99
+        chosen_neg_odmpconf = tf.boolean_mask(chosen_neg_odmpconf, neg_odm_mask)
+        chosen_num_odmneg = tf.shape(chosen_neg_odmpconf)[0]
+        neg_odmclass_id = tf.constant([self.num_classes-1])
+        neg_odmlabel = tf.tile(neg_odmclass_id, [chosen_num_odmneg])
+        neg_odmloss = tf.losses.sparse_softmax_cross_entropy(neg_odmlabel, chosen_neg_odmpconf, reduction=tf.losses.Reduction.MEAN)
 
-        neg_odmlabel = tf.constant([self.num_classes-1])
-        neg_odmlabel = tf.tile(neg_odmlabel, [num_odmneg])
-        neg_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=neg_odmlabel, logits=chosen_neg_odmconf, reduction=tf.losses.Reduction.MEAN)
-        pos_conf_odmloss = tf.losses.sparse_softmax_cross_entropy(labels=pos_odmlabel, logits=pos_odmconf, reduction=tf.losses.Reduction.MEAN)
-        conf_odmloss = neg_conf_odmloss + pos_conf_odmloss
-
-        pos_truth_armbbox_yx = (pos_gbbox_yx - pos_arm_abbox_yx) / pos_arm_abbox_hw
-        pos_truth_armbbox_hw = tf.log(pos_gbbox_hw / pos_arm_abbox_hw)
-        pos_yx_armloss = tf.reduce_sum(self._smooth_l1_loss(pos_armbbox_yx - pos_truth_armbbox_yx), axis=-1)
-        pos_hw_armloss = tf.reduce_sum(self._smooth_l1_loss(pos_armbbox_hw - pos_truth_armbbox_hw), axis=-1)
+        pos_armconf_loss = tf.losses.sparse_softmax_cross_entropy(pos_armlabel, total_pos_armpconf, reduction=tf.losses.Reduction.MEAN)
+        pos_truth_armpbbox_yx = (total_pos_gbbox_yx - total_pos_abbox_yx) / total_pos_abbox_hw
+        pos_truth_armpbbox_hw = tf.log(total_pos_gbbox_hw / total_pos_abbox_hw)
+        pos_yx_armloss = tf.reduce_sum(self._smooth_l1_loss(total_pos_armpbbox_yx - pos_truth_armpbbox_yx), axis=-1)
+        pos_hw_armloss = tf.reduce_sum(self._smooth_l1_loss(total_pos_armpbbox_hw - pos_truth_armpbbox_hw), axis=-1)
         pos_coord_armloss = tf.reduce_mean(pos_yx_armloss + pos_hw_armloss)
 
-        pos_odm_abbox_yx = pos_arm_abbox_hw * pos_armbbox_yx + pos_arm_abbox_yx
-        pos_odm_abbox_hw = tf.exp(pos_armbbox_hw) * pos_arm_abbox_hw
-        pos_truth_odmbbox_yx = (pos_gbbox_yx - pos_odm_abbox_yx) / pos_odm_abbox_hw
-        pos_truth_odmbbox_hw = tf.log(pos_gbbox_hw / pos_odm_abbox_hw)
-        pos_yx_odmloss = tf.reduce_sum(self._smooth_l1_loss(pos_odmbbox_yx - pos_truth_odmbbox_yx), axis=-1)
-        pos_hw_odmloss = tf.reduce_sum(self._smooth_l1_loss(pos_odmbbox_hw - pos_truth_odmbbox_hw), axis=-1)
+        arm_yx = total_pos_armpbbox_yx * total_pos_abbox_hw + total_pos_abbox_yx
+        arm_hw = tf.exp(total_pos_armpbbox_hw) * total_pos_abbox_hw
+
+        pos_odmconf_loss = tf.losses.sparse_softmax_cross_entropy(total_pos_odmlabel, total_pos_odmpconf, reduction=tf.losses.Reduction.MEAN)
+        pos_truth_odmpbbox_yx = (total_pos_gbbox_yx - arm_yx) / arm_hw
+        pos_truth_odmpbbox_hw = tf.log(total_pos_gbbox_hw / arm_hw)
+        pos_yx_odmloss = tf.reduce_sum(self._smooth_l1_loss(total_pos_odmpbbox_yx - pos_truth_odmpbbox_yx), axis=-1)
+        pos_hw_odmloss = tf.reduce_sum(self._smooth_l1_loss(total_pos_odmpbbox_hw - pos_truth_odmpbbox_hw), axis=-1)
         pos_coord_odmloss = tf.reduce_mean(pos_yx_odmloss + pos_hw_odmloss)
 
-        total_loss = conf_armloss + conf_odmloss + pos_coord_armloss + pos_coord_odmloss
-        return total_loss
+        armloss = neg_armloss + pos_armconf_loss + pos_coord_armloss
+        odmloss = neg_odmloss + pos_odmconf_loss + pos_coord_odmloss
+        return armloss + odmloss
 
     def _smooth_l1_loss(self, x):
         return tf.where(tf.abs(x) < 1., 0.5*x*x, tf.abs(x)-0.5)
@@ -561,7 +554,7 @@ class RefineDet320:
             self.sess.run(self.train_initializer)
 
     def _create_saver(self):
-        weights = tf.trainable_variables(scope='feature_extractor') + tf.trainable_variables('ARM') + tf.trainable_variables('TCB') + tf.trainable_variables('ODM')
+        weights = tf.trainable_variables()
         self.saver = tf.train.Saver(weights)
         self.best_saver = tf.train.Saver(weights)
 
@@ -653,7 +646,7 @@ class RefineDet320:
             bn = activation(bn)
         return bn
 
-    def _max_pooling(self, bottom, pool_size, strides, name=None):
+    def _max_pooling(self, bottom, pool_size, strides, name):
         return tf.layers.max_pooling2d(
             inputs=bottom,
             pool_size=pool_size,
@@ -663,7 +656,7 @@ class RefineDet320:
             name=name
         )
 
-    def _avg_pooling(self, bottom, pool_size, strides, name=None):
+    def _avg_pooling(self, bottom, pool_size, strides, name):
         return tf.layers.average_pooling2d(
             inputs=bottom,
             pool_size=pool_size,
@@ -673,7 +666,7 @@ class RefineDet320:
             name=name
         )
 
-    def _dropout(self, bottom, name=None):
+    def _dropout(self, bottom, name):
         return tf.layers.dropout(
             inputs=bottom,
             rate=self.prob,

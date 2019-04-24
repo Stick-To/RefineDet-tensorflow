@@ -12,11 +12,11 @@ import os
 # from utils.voc_classname_encoder import classname_to_ids
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-lr = 0.01
+lr = 0.001
 batch_size = 32
 buffer_size = 1024
 epochs = 300
-reduce_lr_epoch = [50, 200]
+reduce_lr_epoch = [150, 220]
 ckpt_path = os.path.join('.', 'vgg_16.ckpt')
 config = {
     'mode': 'train',                            # 'train' ,'test'
