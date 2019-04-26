@@ -4,7 +4,7 @@ from __future__ import print_function
 from utils import tfrecord_voc_utils as voc_utils
 import tensorflow as tf
 import numpy as np
-import RefineDet320123 as net
+import RefineDet as net
 import os
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
