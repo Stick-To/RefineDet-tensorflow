@@ -4,28 +4,29 @@ from __future__ import print_function
 from utils import tfrecord_voc_utils as voc_utils
 import tensorflow as tf
 import numpy as np
-import RefineDet320 as net
+import RefineDet320123 as net
 import os
-# import matplotlib.pyplot as plt
-# import matplotlib.patches as patches
-# from skimage import io, transform
-# from utils.voc_classname_encoder import classname_to_ids
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-lr = 0.001
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+from skimage import io, transform
+from utils.voc_classname_encoder import classname_to_ids
+# os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
+# os.environ['CUDA_VISIBLE_DEVICES'] = '2'
+lr = 0.0001
 batch_size = 32
 buffer_size = 1024
 epochs = 300
-reduce_lr_epoch = [150, 220]
+reduce_lr_epoch = []
 ckpt_path = os.path.join('.', 'vgg_16.ckpt')
 config = {
     'mode': 'train',                            # 'train' ,'test'
+    'input_size': 320,                          # 320 for refinedet320, 512 for refinedet512
     'data_format': 'channels_last',             # 'channels_last' ,'channels_first'
     'num_classes': 20,
-    'weight_decay': 5e-4,
+    'weight_decay': 1e-4,
     'keep_prob': 0.5,                           # not used
     'batch_size': batch_size,
-    'nms_score_threshold': 0.5,
+    'nms_score_threshold': 0.1,
     'nms_max_boxes': 20,
     'nms_iou_threshold': 0.45,
     'pretraining_weight': ckpt_path
@@ -34,30 +35,30 @@ config = {
 image_augmentor_config = {
     'data_format': 'channels_last',
     'output_shape': [320, 320],
-    'zoom_size': [340, 340],
+    'zoom_size': [330, 330],
     'crop_method': 'random',
-    'flip_prob': [0., 0.],
+    'flip_prob': [0.0, 0.5],
     'fill_mode': 'BILINEAR',
-    'keep_aspect_ratios': True,
+    'keep_aspect_ratios': False,
     'constant_values': 0.,
-    'rotate_range': [-5., 5.],
+    # 'rotate_range': None,
     'pad_truth_to': 60,
 }
 
-data = ['./test/test_00000-of-00005.tfrecord',
-        './test/test_00001-of-00005.tfrecord']
+data = os.listdir('./voc2007/')
+data = [os.path.join('./voc2007/', name) for name in data]
 
 train_gen = voc_utils.get_generator(data,
                                     batch_size, buffer_size, image_augmentor_config)
 trainset_provider = {
     'data_shape': [320, 320, 3],
-    'num_train': 5000,
+    'num_train': 5011,
     'num_val': 0,                               # not used
     'train_generator': train_gen,
     'val_generator': None                       # not used
 }
 refinedet = net.RefineDet320(config, trainset_provider)
-# refinedet.load_weight('./refinedet320/test-64954')
+refinedet.load_weight('./refinedet320/test-1092')
 for i in range(epochs):
     print('-'*25, 'epoch', i, '-'*25)
     if i in reduce_lr_epoch:
