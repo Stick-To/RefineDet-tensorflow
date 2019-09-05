@@ -41,7 +41,8 @@ image_augmentor_config = {
     'fill_mode': 'BILINEAR',
     'keep_aspect_ratios': False,
     'constant_values': 0.,
-    # 'rotate_range': None,
+    'color_jitter_prob': 0.5,
+    'rotate': [0.5, -5., -5.],
     'pad_truth_to': 60,
 }
 
